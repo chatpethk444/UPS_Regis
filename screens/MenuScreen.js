@@ -58,7 +58,7 @@ export default function MenuScreen({ student, setView, onBatch, onLogout }) {
               </View>
             </View>
             <Text style={styles.cardTitle}>ลงทะเบียนวิชาภาคฯ ยกชุด</Text>
-            <Text style={styles.cardDesc}>คัดสรรวิชาตามแผนการเรียนของคุณ พร้อมสิทธิพิเศษในการเลือกเซกชันก่อนใคร</Text>
+            <Text style={styles.cardDesc}>คัดสรรวิชาตามแผนการเรียนของคุณ</Text>
             
             <TouchableOpacity style={styles.actionBtn} onPress={() => setView('REGISTRATION')}>
               <Text style={styles.btnText}>จัดการแผนการเรียน</Text>

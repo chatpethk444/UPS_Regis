@@ -1,7 +1,7 @@
 // api.js — จุดเดียวสำหรับ call ทุก API
 // ✅ แก้ IP ที่นี่ที่เดียว ไม่ต้องแก้ทุกไฟล์
 
-export const BASE_URL = "http://10.146.198.135:8000";
+export const BASE_URL = "http://10.230.252.135:8000";
 // สำหรับเครื่องจริง: เปลี่ยนเป็น IP เครื่องคอม เช่น "http://192.168.1.x:8000"
 
 /**
@@ -15,12 +15,12 @@ export async function apiFetch(path, options = {}) {
   });
 
   // 1. อ่านข้อมูลเป็นข้อความดิบๆ ก่อน
-  const text = await res.text(); 
+  const text = await res.text();
   let data;
-  
+
   try {
     // 2. พยายามแปลงเป็น JSON ถ้าปกติจะผ่านตรงนี้ไปได้
-    data = JSON.parse(text); 
+    data = JSON.parse(text);
   } catch (err) {
     // 3. ถ้าไม่ใช่ JSON (เช่นคำว่า "Internal...") ให้โยน Error ออกไปตรงๆ
     throw new Error(text || "เซิร์ฟเวอร์ตอบกลับมาเป็นรูปแบบที่ไม่รู้จัก");
@@ -58,14 +58,12 @@ export const addToCartAPI = (student_id, course_code, section_number) =>
     body: JSON.stringify({ student_id, course_code, section_number }),
   });
 
-export const removeFromCartAPI = (student_id, course_code) =>
-  fetch(`${BASE_URL}/cart/remove/${student_id}/${course_code}`, {
-    method: "DELETE",
-  }).then(async (res) => {
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "ลบไม่สำเร็จ");
-    return data;
-  });
+// แก้จากของเดิมเป็นแบบนี้
+export const removeFromCartAPI = (student_id, course_code, section_type) =>
+  apiFetch(
+    `/cart/remove/${student_id}/${course_code}?section_type=${section_type || ""}`,
+    { method: "DELETE" },
+  );
 
 // --- Enrollment ---
 export const confirmEnrollmentAPI = (student_id) =>
@@ -91,7 +89,6 @@ export const batchAddRequiredAPI = async (student_id) => {
   return required.length;
 };
 
-
 // --- Group Sync ---
 export const createGroupAPI = (student_id) =>
   apiFetch(`/group/create/${student_id}`, { method: "POST" });
@@ -103,7 +100,9 @@ export const getMyGroupAPI = (student_id) =>
   apiFetch(`/group/my/${student_id}`, { method: "GET" });
 
 export const approveMemberAPI = (leader_id, target_id, action) =>
-  apiFetch(`/group/approve/${leader_id}/${target_id}/${action}`, { method: "POST" });
+  apiFetch(`/group/approve/${leader_id}/${target_id}/${action}`, {
+    method: "POST",
+  });
 
 export const syncGroupCartAPI = (leader_id) =>
   apiFetch(`/group/sync/${leader_id}`, { method: "POST" });
@@ -120,3 +119,13 @@ export const toggleReadyAPI = (student_id) =>
 
 export const registerGroupAllAPI = (leader_id) =>
   apiFetch(`/group/register-all/${leader_id}`, { method: "POST" });
+
+// --- Batch Registration & Conflict Check ---
+export const getSuggestedCoursesAPI = (student_id) =>
+  apiFetch(`/courses/suggested/${student_id}`, { method: "GET" });
+
+export const batchAddWithCheckAPI = (student_id, items) =>
+  apiFetch(`/cart/batch_add_with_check`, {
+    method: "POST",
+    body: JSON.stringify({ student_id, items }),
+  });

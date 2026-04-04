@@ -29,7 +29,6 @@ const GRID_START_HOUR = 8;
 const GRID_END_HOUR = 19;
 const COLUMN_COUNT = GRID_END_HOUR - GRID_START_HOUR;
 
-// 🌟 ยืนยัน 25px ตามคำขอครับ! เล็กจิ๋วสะใจแน่นอน
 const ONE_HOUR_WIDTH = 25;
 const DAY_COLUMN_WIDTH = 60;
 const TOTAL_GRID_WIDTH = ONE_HOUR_WIDTH * COLUMN_COUNT;
@@ -57,6 +56,7 @@ const DAY_MAP = {
 };
 
 export default function AIScreen({ student, setView }) {
+  // 🌟 รวม State ทั้งหมดไว้ตรงนี้ (ใน Component)
   const [availableCourses, setAvailableCourses] = useState([]);
   const [selectedCodes, setSelectedCodes] = useState([]);
   const [suggestions, setSuggestions] = useState([]);
@@ -64,15 +64,68 @@ export default function AIScreen({ student, setView }) {
   const [loadingCourses, setLoadingCourses] = useState(false);
   const [myCart, setMyCart] = useState([]);
   const [mySchedule, setMySchedule] = useState([]);
+  const [cartCourseCodes, setCartCourseCodes] = useState([]);
+  const [scheduleCourseCodes, setScheduleCourseCodes] = useState([]);
 
   const [zModalVisible, setZModalVisible] = useState(false);
   const [zOptions, setZOptions] = useState([]);
-  const [zTargetCourse, setZTargetCourse] = useState(null); // วิชา Z ที่ถูกกด
+  const [zTargetCourse, setZTargetCourse] = useState(null);
   const [zLoading, setZLoading] = useState(false);
 
+  // 🌟 1. ดึงข้อมูลทุกอย่างพร้อมกัน (เร็วขึ้น 3 เท่า)
   useEffect(() => {
-    if (student) loadCourses();
-  }, []);
+    if (student) {
+      const fetchAllData = async () => {
+        setLoadingCourses(true); // หมุนหลอดโหลดรอ
+        try {
+          // ยิง API พร้อมกัน ไม่ต้องรอทีละคิวให้เสียเวลา
+          const [cartData, scheduleData, coursesData] = await Promise.all([
+            getCartAPI(student.student_id).catch(() => []),
+            getScheduleAPI(student.student_id).catch(() => []),
+            getAvailableCoursesAPI(student.student_id).catch(() => []),
+          ]);
+
+          const carts = Array.isArray(cartData) ? cartData : [];
+          const scheds = Array.isArray(scheduleData) ? scheduleData : [];
+          const courses = Array.isArray(coursesData) ? coursesData : [];
+
+          setCartCourseCodes(
+            carts.map((c) => c.course_code || c.course_id || ""),
+          );
+          setScheduleCourseCodes(
+            scheds.map((c) => c.course_code || c.course_id || ""),
+          );
+          setAvailableCourses(courses);
+        } catch (error) {
+          console.error("ดึงข้อมูลล้มเหลว:", error);
+        } finally {
+          setLoadingCourses(false); // ปิดหลอดโหลดเมื่อของครบ 100% เท่านั้น
+        }
+      };
+
+      fetchAllData();
+    }
+  }, [student]);
+
+  // 🌟 ฟังก์ชันดึงข้อมูลเช็กวิชาซ้ำ
+  // 🌟 ฟังก์ชันดึงข้อมูลเช็กวิชาซ้ำ (แบบป้องกันแอปพัง)
+  const fetchExistingCourses = async () => {
+    try {
+      const cartData = await getCartAPI(student.student_id);
+      const scheduleData = await getScheduleAPI(student.student_id);
+
+      // ✅ เพิ่มเช็ก Array.isArray ป้องกัน API ส่ง Object อื่นมาแล้วแอปพัง
+      const carts = Array.isArray(cartData) ? cartData : [];
+      const scheds = Array.isArray(scheduleData) ? scheduleData : [];
+
+      setCartCourseCodes(carts.map((c) => c.course_code || c.course_id || ""));
+      setScheduleCourseCodes(
+        scheds.map((c) => c.course_code || c.course_id || ""),
+      );
+    } catch (error) {
+      console.error("ดึงข้อมูลเช็กวิชาซ้ำล้มเหลว:", error);
+    }
+  };
 
   const loadCourses = async () => {
     setLoadingCourses(true);
@@ -86,10 +139,42 @@ export default function AIScreen({ student, setView }) {
     }
   };
 
-  const toggleCourse = (code) =>
+  // 🌟 ฟังก์ชันเลือกวิชาเป้าหมาย พร้อมดักแจ้งเตือน
+  // 🌟 ฟังก์ชันเลือกวิชาเป้าหมาย พร้อมดักแจ้งเตือน (แบบปลอดภัย)
+  const toggleCourse = (code) => {
+    if (!code) return; // ป้องกันบั๊กกรณีไม่มีรหัสวิชา
+
+    const isSelected = selectedCodes.includes(code);
+
+    // ถ้ากำลังจะ "เพิ่ม" (ยังไม่ได้ถูกเลือก) ให้เช็กตะกร้าและตารางเรียนก่อน
+    if (!isSelected) {
+      const inCart =
+        Array.isArray(cartCourseCodes) && cartCourseCodes.includes(code);
+      const inSchedule =
+        Array.isArray(scheduleCourseCodes) &&
+        scheduleCourseCodes.includes(code);
+
+      if (inCart) {
+        Alert.alert(
+          "ไม่สามารถเลือกได้",
+          `รายวิชา ${code} มีอยู่ในตะกร้าของคุณแล้ว`,
+        );
+        return;
+      }
+      if (inSchedule) {
+        Alert.alert(
+          "ไม่สามารถเลือกได้",
+          `รายวิชา ${code} มีอยู่ในตารางเรียนของคุณแล้ว`,
+        );
+        return;
+      }
+    }
+
+    // ถ้าผ่านเงื่อนไข (หรือกำลังกดเพื่อเอาออก) ให้อัปเดต UI
     setSelectedCodes((prev) =>
-      prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code],
+      isSelected ? prev.filter((c) => c !== code) : [...prev, code],
     );
+  };
 
   const handleAIProcess = async () => {
     if (selectedCodes.length === 0)
@@ -105,20 +190,18 @@ export default function AIScreen({ student, setView }) {
     }
   };
 
-  const handleAcceptSuggestion = async (plan) => {
+ const handleAcceptSuggestion = async (plan) => {
     setCalculating(true);
     try {
-      const { BASE_URL } = require("../api"); // ดึง BASE_URL เผื่อ API เดิมไม่ได้รองรับการส่ง type
+      const { BASE_URL } = require("../api");
 
-      // 🌟 1. กรองโดยใช้ รหัสวิชา + ประเภท (T/L) เป็นคีย์ เพื่อให้เก็บไว้ทั้ง T และ L
       const uniqueCourses = [];
       const seenKeys = new Set();
 
       for (const item of plan) {
         let code = item?.course_code || item?.course_id || item?.code;
-        let type = item?.section_type || "T"; // ดึงประเภทมาด้วย
-
-        let key = `${code}-${type}`; // คีย์จะเป็นเช่น "CPE407-T" และ "CPE407-L"
+        let type = item?.section_type || "T";
+        let key = `${code}-${type}`;
 
         if (code && !seenKeys.has(key)) {
           seenKeys.add(key);
@@ -126,30 +209,43 @@ export default function AIScreen({ student, setView }) {
         }
       }
 
-      // 🌟 2. ยิง API ลงตะกร้า โดยส่ง section_type ไปให้ Database ด้วย
-      for (const rawSec of uniqueCourses) {
-        let code = rawSec?.course_code || rawSec?.course_id || rawSec?.code;
-        let secNum = rawSec?.section_number || rawSec?.sec || 1;
-        let type = rawSec?.section_type;
+      // 🌟 1. จัดรูปแบบข้อมูลให้เป็น Array เพื่อส่งไปเช็กทีเดียว
+      const items = uniqueCourses.map((rawSec) => ({
+        course_code: rawSec?.course_code || rawSec?.course_id || rawSec?.code,
+        section_number: String(rawSec?.section_number || rawSec?.sec || 1),
+        section_type: rawSec?.section_type || "T",
+      }));
 
-        // ใช้ fetch ยิงตรงเพื่อให้ส่งค่า section_type เข้า database ได้แน่นอน
-        const res = await fetch(`${BASE_URL}/cart/add`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            student_id: student.student_id,
-            course_code: code,
-            section_number: secNum,
-            section_type: type, // ส่งประเภทกำกับไปด้วย Database จะได้เก็บเป็น 2 บรรทัด!
-          }),
-        });
+      // 🌟 2. ส่งไปให้ Backend เช็กเวลาชนกับตะกร้าปัจจุบัน (ใช้ batch_add_with_check)
+      const res = await fetch(`${BASE_URL}/cart/batch_add_with_check`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          student_id: student.student_id,
+          items: items, // ส่งไปทั้งแผนเลย
+        }),
+      });
 
-        if (!res.ok) {
-          console.warn(`เตือน: ลงวิชา ${code} (${type}) ไม่สำเร็จ`);
-        }
+      const data = await res.json();
+
+      // 🌟 3. ถ้า Backend ตอบกลับมาว่ามีวิชาชนกัน ให้แจ้งเตือนและหยุดทำงาน
+      if (data.status === "conflict") {
+        const conflictMsg = data.conflicts
+          .map((c) => `- วิชา ${c.course_code} (Sec ${c.requested_section})`)
+          .join("\n");
+          
+        Alert.alert(
+          "พบเวลาเรียนชนกัน!",
+          `แผนการเรียนที่เลือก มีเวลาเรียนทับซ้อนกับวิชาในตะกร้า/ตารางเรียนของคุณ:\n\n${conflictMsg}\n\nกรุณาเคลียร์วิชาในตะกร้าออกก่อน หรือจัดแผนใหม่`,
+        );
+        return; // สั่งหยุด ไม่เพิ่มลงตะกร้า
       }
 
-      Alert.alert("สำเร็จ!", "เพิ่มลงตะกร้าเรียบร้อยแล้ว", [
+      if (!res.ok) {
+        throw new Error(data.detail || "เกิดข้อผิดพลาดจากเซิร์ฟเวอร์");
+      }
+
+      Alert.alert("สำเร็จ!", "เพิ่มแผนการเรียนลงตะกร้าเรียบร้อยแล้ว", [
         { text: "ไปที่ตะกร้า", onPress: () => setView("CART") },
       ]);
     } catch (err) {
@@ -194,7 +290,7 @@ export default function AIScreen({ student, setView }) {
   };
 
   const handleZCourseClick = async (item) => {
-    if (!item.course_code.startsWith("Z")) return; // ถ้าไม่ใช่วิชา Z ไม่ต้องทำอะไร
+    if (!item.course_code.startsWith("Z")) return;
     setZTargetCourse(item);
     setZModalVisible(true);
     setZLoading(true);
@@ -213,41 +309,44 @@ export default function AIScreen({ student, setView }) {
 
   const handleSelectZOption = async (selectedCourse) => {
     try {
-      // 1. เช็คว่าลงวิชานี้ไปแล้วหรือยัง (ในตะกร้า หรือ ตารางเรียน)
-      const cart = await getCartAPI(student.student_id);
-      const sched = await getScheduleAPI(student.student_id);
-      
-      const inCart = cart.some(c => c.course_id === selectedCourse.course_code);
-      const inSched = sched.some(s => s.course_id === selectedCourse.course_code);
-      
-      if (inCart || inSched) {
-        Alert.alert("ไม่สามารถเลือกได้", "คุณมีวิชานี้อยู่ในตะกร้าหรือตารางเรียนแล้ว!");
+      // ใช้ State เช็กวิชา Z ซ้ำ
+      const codeToCheck = selectedCourse.course_code;
+      if (
+        cartCourseCodes.includes(codeToCheck) ||
+        scheduleCourseCodes.includes(codeToCheck)
+      ) {
+        Alert.alert(
+          "ไม่สามารถเลือกได้",
+          "คุณมีวิชานี้อยู่ในตะกร้าหรือตารางเรียนแล้ว!",
+        );
         return;
       }
 
-      // 2. แทนที่รหัสวิชา Z ด้วยวิชาใหม่ ในบล็อคเลือกวิชา (availableCourses)
-      const updatedCourses = availableCourses.map(c => {
+      const updatedCourses = availableCourses.map((c) => {
         if (c.course_code === zTargetCourse.course_code) {
           return {
             ...c,
-            course_code: selectedCourse.course_code, // สลับเป็นรหัสใหม่
-            course_name: selectedCourse.course_name, // สลับชื่อใหม่
+            course_code: selectedCourse.course_code,
+            course_name: selectedCourse.course_name,
           };
         }
         return c;
       });
       setAvailableCourses(updatedCourses);
 
-      // 3. ติ๊กเลือกวิชานี้ให้ AI นำไปประมวลผลอัตโนมัติ
-      let newSelected = selectedCodes.filter(code => code !== zTargetCourse.course_code); // เอา Z ตัวเก่าออก
+      let newSelected = selectedCodes.filter(
+        (code) => code !== zTargetCourse.course_code,
+      );
       if (!newSelected.includes(selectedCourse.course_code)) {
-        newSelected.push(selectedCourse.course_code); // ใส่วิชาใหม่เข้าไป
+        newSelected.push(selectedCourse.course_code);
       }
       setSelectedCodes(newSelected);
 
       setZModalVisible(false);
-      Alert.alert("สำเร็จ", `เลือกวิชา ${selectedCourse.course_code} เรียบร้อย`);
-
+      Alert.alert(
+        "สำเร็จ",
+        `เลือกวิชา ${selectedCourse.course_code} เรียบร้อย`,
+      );
     } catch (error) {
       Alert.alert("ข้อผิดพลาด", "ตรวจสอบข้อมูลล้มเหลว");
     }
@@ -276,9 +375,11 @@ export default function AIScreen({ student, setView }) {
           </TouchableOpacity>
         </View>
 
+        {/* 🌟 1. แก้เว้นวรรคให้ถูกต้อง ใช้ "always" และเพิ่ม paddingBottom ป้องกันเมนูด้านล่างบัง */}
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: 120 }]}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="always"
         >
           <View style={styles.heroSection}>
             <View style={styles.heroTextContainer}>
@@ -323,7 +424,6 @@ export default function AIScreen({ student, setView }) {
                       horizontal={true}
                       showsHorizontalScrollIndicator={true}
                     >
-                      {/* 🌟 บังคับบวกความกว้างไปอีก 100px เพื่อให้มีพื้นที่เหลือให้ Scroll ทำงานได้ */}
                       <View
                         style={{
                           width: TOTAL_GRID_WIDTH + DAY_COLUMN_WIDTH + 100,
@@ -442,7 +542,6 @@ export default function AIScreen({ student, setView }) {
 
                   <Text style={styles.sectionTitleSmall}>รายละเอียดวิชา</Text>
                   {(() => {
-                    // จัดกลุ่มวิชาตามวัน
                     const groupedByDay = plan.reduce((acc, item) => {
                       const dayKey =
                         item.day_of_week || item.class_times?.[0]?.day;
@@ -455,15 +554,12 @@ export default function AIScreen({ student, setView }) {
                     return Object.entries(groupedByDay).map(
                       ([dayStr, courses], dIdx) => (
                         <View key={dIdx} style={styles.dayGroupContainer}>
-                          {/* Header ปรับสีให้เข้ากับธีม (ชมพู/เบอร์กันดี) */}
                           <View style={styles.dayGroupHeader}>
                             <Text style={styles.dayGroupTitle}>{dayStr}</Text>
                             <Text style={styles.dayGroupCount}>
                               {courses.length} Subjects
                             </Text>
                           </View>
-
-                          {/* List วิชาแบบ Timeline */}
                           <View style={styles.dayGroupBody}>
                             {courses.map((item, idx) => {
                               const startTime =
@@ -471,8 +567,6 @@ export default function AIScreen({ student, setView }) {
                               const endTime =
                                 item.end_time || item.class_times?.[0]?.end;
                               const isLast = idx === courses.length - 1;
-
-                              // 🌟 1. ค้นหาชื่อวิชาจาก availableCourses (เพิ่ม 2 บรรทัดนี้)
                               const courseInfo = availableCourses.find(
                                 (c) => c.course_code === item.course_code,
                               );
@@ -480,18 +574,11 @@ export default function AIScreen({ student, setView }) {
                                 courseInfo?.course_name ||
                                 item.course_name ||
                                 "ไม่ระบุชื่อวิชา";
-
-                              // 🌟 (แถม) ทำเช็ค ทฤษฎี/ปฏิบัติ ให้เหมือนอันที่แล้ว
                               const isLab =
                                 item.type === "L" ||
                                 item.section_type === "L" ||
                                 parseInt(item.section_number || "1") >= 50;
-                              const typeLabel = isLab ? "ทฤษฎี" : "ปฏิบัติ";
-
                               const secNum = String(item.section_number || "1");
-                              const roomStr = item.room
-                                ? `ห้อง ${item.room}`
-                                : "ห้อง 05-0309";
 
                               return (
                                 <TouchableOpacity
@@ -502,34 +589,25 @@ export default function AIScreen({ student, setView }) {
                                   }
                                   onPress={() => handleZCourseClick(item)}
                                 >
-                                  {/* ฝั่งซ้าย: เวลา */}
                                   <View style={styles.timelineTimeCol}>
                                     <Text style={styles.timelineTimeText}>
                                       {formatTimeDisplay(startTime)}-
                                       {formatTimeDisplay(endTime)}
                                     </Text>
                                   </View>
-
-                                  {/* ตรงกลาง: แกนเวลา (สีเข้าธีม) */}
                                   <View style={styles.timelineCenterCol}>
                                     <View style={styles.timelineDot} />
                                     {!isLast && (
                                       <View style={styles.timelineLine} />
                                     )}
                                   </View>
-
-                                  {/* ฝั่งขวา: รายละเอียด (ปรับฟอนต์และสี) */}
                                   <View style={styles.timelineDetailCol}>
                                     <Text style={styles.timelineCodeText}>
                                       {item.course_code}
                                     </Text>
-
-                                    {/* 🌟 2. เปลี่ยนจาก item.course_name เป็นตัวแปร courseName ที่เราหามาได้ */}
                                     <Text style={styles.timelineCodeText}>
                                       {courseName}
                                     </Text>
-
-                                    {/* 🌟 3. อัปเดตกลุ่มให้แสดง ทฤษฎี/ปฏิบัติ ด้วยเลย */}
                                     <Text style={styles.timelineSubText}>
                                       กลุ่ม: {secNum}
                                     </Text>
@@ -573,68 +651,101 @@ export default function AIScreen({ student, setView }) {
                 />
               ) : (
                 <View style={styles.coursesList}>
-                  {availableCourses.map((c) => (
-                    <TouchableOpacity
-                      key={c.course_code}
-                      style={[
-                        styles.courseSelectionCard,
-                        selectedCodes.includes(c.course_code) &&
-                          styles.courseSelectionCardSelected,
-                      ]}
-                      // 🌟 แก้ตรง onPress ด้านล่างนี้
-                      onPress={() => {
-                        if (c.course_code.startsWith("Z")) {
-                          handleZCourseClick(c); // ถ้าเป็น Z ให้เด้ง Popup
-                        } else {
-                          toggleCourse(c.course_code); // ถ้าปกติ ให้ติ๊กเลือก
-                        }
-                      }}
-                      activeOpacity={0.8}
-                    >
-                      <View style={styles.courseSelectionInfo}>
-                        <Text
+                  {(() => {
+                    const cartSet = new Set(cartCourseCodes || []);
+                    const scheduleSet = new Set(scheduleCourseCodes || []);
+                    const selectedSet = new Set(selectedCodes || []);
+
+                    return availableCourses.map((c) => {
+                      const inCart = cartSet.has(c.course_code);
+                      const inSchedule = scheduleSet.has(c.course_code);
+                      const isSelected = selectedSet.has(c.course_code);
+
+                      const isLocked = inCart || inSchedule;
+                      let lockReason = "";
+                      if (inCart) lockReason = " (ในตะกร้า)";
+                      else if (inSchedule) lockReason = " (ในตาราง)";
+
+                      return (
+                        <TouchableOpacity
+                          key={c.course_code}
+                          disabled={isLocked}
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                           style={[
-                            styles.csCode,
-                            selectedCodes.includes(c.course_code) && {
-                              color: "white",
-                            },
+                            styles.courseSelectionCard,
+                            isSelected
+                              ? styles.courseSelectionCardSelected
+                              : null,
+                            isLocked
+                              ? {
+                                  opacity: 0.5,
+                                  backgroundColor: "#F5F5F5",
+                                  borderColor: "#E0E0E0",
+                                }
+                              : null,
                           ]}
+                          activeOpacity={0.6}
+                          onPress={() => {
+                            if (c.course_code.startsWith("Z")) {
+                              handleZCourseClick(c);
+                            } else {
+                              toggleCourse(c.course_code);
+                            }
+                          }}
                         >
-                          {c.course_code}
-                        </Text>
-                        <Text
-                          style={[
-                            styles.csName,
-                            selectedCodes.includes(c.course_code) && {
-                              color: "white",
-                            },
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {c.course_name}
-                        </Text>
-                      </View>
-                      <View
-                        style={[
-                          styles.csCreditBadge,
-                          selectedCodes.includes(c.course_code) && {
-                            backgroundColor: "rgba(255,255,255,0.2)",
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.csCreditText,
-                            selectedCodes.includes(c.course_code) && {
-                              color: "white",
-                            },
-                          ]}
-                        >
-                          {c.credits || "-"} หน่วยกิต
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  ))}
+                          <View
+                            style={styles.courseSelectionInfo}
+                            pointerEvents="none"
+                          >
+                            <Text
+                              style={[
+                                styles.csCode,
+                                isSelected ? { color: "white" } : null,
+                                isLocked ? { color: "#E53935" } : null,
+                              ]}
+                            >
+                              {c.course_code}
+                              {isLocked ? (
+                                <Text
+                                  style={{ fontSize: 10, color: "#E53935" }}
+                                >
+                                  {lockReason}
+                                </Text>
+                              ) : null}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.csName,
+                                isSelected ? { color: "white" } : null,
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {c.course_name}
+                            </Text>
+                          </View>
+
+                          <View
+                            pointerEvents="none"
+                            style={[
+                              styles.csCreditBadge,
+                              isSelected
+                                ? { backgroundColor: "rgba(255,255,255,0.2)" }
+                                : null,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.csCreditText,
+                                isSelected ? { color: "white" } : null,
+                              ]}
+                            >
+                              {c.credits || "-"} หน่วยกิต
+                            </Text>
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    });
+                  })()}
                 </View>
               )}
               <TouchableOpacity
@@ -683,13 +794,13 @@ export default function AIScreen({ student, setView }) {
             <Text style={styles.navText}>SCHEDULE</Text>
           </TouchableOpacity>
         </View>
-        {/* Modal สำหรับเลือกวิชา Z */}
+
         <Modal visible={zModalVisible} transparent={true} animationType="slide">
           <View style={styles.modalBackground}>
             <View style={styles.modalContainer}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>
-                   {zTargetCourse?.course_code} เลือกวิชาเสรี
+                  {zTargetCourse?.course_code} เลือกวิชาเสรี
                 </Text>
                 <TouchableOpacity onPress={() => setZModalVisible(false)}>
                   <MaterialIcons name="close" size={24} color="#514345" />
@@ -708,18 +819,31 @@ export default function AIScreen({ student, setView }) {
                   keyExtractor={(item) => item.course_code}
                   renderItem={({ item }) => (
                     <View style={styles.zCourseCard}>
-                      <Text style={styles.zCourseCode}>{item.course_code} {item.course_name}</Text>
-                      <Text style={styles.zCourseCredit}>หน่วยกิต: {item.credits}</Text>
-                      
-                      {/* แสดง Sec ไว้ให้ดูเฉยๆ */}
-                  
-
-                      {/* 🌟 ปุ่มสำหรับเลือกวิชานี้ไปแทนที่ Z */}
-                      <TouchableOpacity 
-                        style={{ backgroundColor: "#D23669", padding: 10, borderRadius: 8, marginTop: 12, alignItems: "center" }}
+                      <Text style={styles.zCourseCode}>
+                        {item.course_code} {item.course_name}
+                      </Text>
+                      <Text style={styles.zCourseCredit}>
+                        หน่วยกิต: {item.credits}
+                      </Text>
+                      <TouchableOpacity
+                        style={{
+                          backgroundColor: "#D23669",
+                          padding: 10,
+                          borderRadius: 8,
+                          marginTop: 12,
+                          alignItems: "center",
+                        }}
                         onPress={() => handleSelectZOption(item)}
                       >
-                        <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 14 }}>เลือกวิชานี้</Text>
+                        <Text
+                          style={{
+                            color: "#fff",
+                            fontWeight: "bold",
+                            fontSize: 14,
+                          }}
+                        >
+                          เลือกวิชานี้
+                        </Text>
                       </TouchableOpacity>
                     </View>
                   )}
@@ -732,6 +856,8 @@ export default function AIScreen({ student, setView }) {
     </LinearGradient>
   );
 }
+
+// โค้ดส่วน StyleSheet ของคุณใส่ต่อจากตรงนี้ได้เลยครับ...
 
 const styles = StyleSheet.create({
   container: { flex: 1 },

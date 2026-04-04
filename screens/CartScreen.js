@@ -1,52 +1,122 @@
-// screens/CartScreen.js
 import React, { useState, useEffect } from "react";
 import {
-  View, Text, FlatList, TouchableOpacity,
-  Alert, ActivityIndicator, SafeAreaView,
+  View,
+  Text,
+  StyleSheet,
+  SafeAreaView,
+  TouchableOpacity,
+  ScrollView,
+  ActivityIndicator,
+  Dimensions,
+  Alert,
 } from "react-native";
-import { Feather } from "@expo/vector-icons";
-import { ScreenHeader, CourseBadge, COLORS, sharedStyles } from "../components/shared";
+import { MaterialIcons, Feather } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { getCartAPI, removeFromCartAPI, confirmEnrollmentAPI } from "../api";
 
-export default function CartScreen({ student, setView }) {
-  const [items, setItems]             = useState([]);
-  const [loadingCart, setLoadingCart] = useState(false);
+const { width } = Dimensions.get("window");
 
-  useEffect(() => { fetchCart(); }, []);
+// 🌟 ปรับ ONE_HOUR_WIDTH เป็น 45 เพื่อให้ตารางกว้างล้นจอและเลื่อนได้เหมือน ScheduleScreen
+const GRID_START_HOUR = 8;
+const GRID_END_HOUR = 19;
+const COLUMN_COUNT = GRID_END_HOUR - GRID_START_HOUR;
+const ONE_HOUR_WIDTH = 25;
+const DAY_COLUMN_WIDTH = 60;
+const TOTAL_GRID_WIDTH = ONE_HOUR_WIDTH * COLUMN_COUNT;
+
+const DAY_MAP = {
+  Mon: "จันทร์",
+  Tue: "อังคาร",
+  Wed: "พุธ",
+  Thu: "พฤหัสบดี",
+  Fri: "ศุกร์",
+  Sat: "เสาร์",
+  Sun: "อาทิตย์",
+  Monday: "จันทร์",
+  Tuesday: "อังคาร",
+  Wednesday: "พุธ",
+  Thursday: "พฤหัสบดี",
+  Friday: "ศุกร์",
+  จันทร์: "จันทร์",
+  อังคาร: "อังคาร",
+  พุธ: "พุธ",
+  พฤหัส: "พฤหัสบดี",
+  พฤหัสบดี: "พฤหัสบดี",
+  ศุกร์: "ศุกร์",
+  เสาร์: "เสาร์",
+  อาทิตย์: "อาทิตย์",
+};
+
+const DAY_KEYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+export default function CartScreen({ student, setView }) {
+  const [items, setItems] = useState([]);
+  const [loadingCart, setLoadingCart] = useState(false);
+  const [scheduleData, setScheduleData] = useState([]);
+
+  useEffect(() => {
+    fetchCart();
+  }, []);
 
   const fetchCart = async () => {
     setLoadingCart(true);
     try {
       const data = await getCartAPI(student.student_id);
 
-      // ✅ จัดกลุ่มตาม course_code แต่เก็บ section แยก T/L
-      // แต่ละ entry ใน cart มี section_type ต่างกัน → เก็บแยกใน array sections
-      const grouped = data.reduce((acc, item) => {
-        const code = item.course_code;
-        if (!code) return acc;
-        if (!acc[code]) {
-          acc[code] = {
-            course_code: code,
-            course_name: item.course_name,
-            credits: item.credits,
-            sections: [],
-          };
-        }
-        // เก็บแต่ละ section พร้อม type และ time_info
-        const exists = acc[code].sections.find(
-          (s) => s.section_number === item.section_number && s.section_type === item.section_type
-        );
-        if (!exists) {
-          acc[code].sections.push({
-            section_number: item.section_number,
+      const rawSchedule = [];
+      setItems(data);
+
+      data.forEach((item) => {
+        if (item.day_of_week && item.start_time && item.end_time) {
+          rawSchedule.push({
+            course_code: item.course_code || item.course_id,
+            day_of_week: item.day_of_week,
+            start_time: String(item.start_time).substring(0, 5), // ตัดให้เหลือแค่ HH:MM เผื่อมีวินาทีติดมา
+            end_time: String(item.end_time).substring(0, 5),
             section_type: item.section_type || "T",
-            time_info: item.time_info || "",
           });
         }
-        return acc;
-      }, {});
+      });
 
-      setItems(Object.values(grouped));
+      // ยุบรวมก้อนวิชา (Logic เดียวกับ ScheduleScreen)
+      const merged = rawSchedule.reduce((acc, curr) => {
+        const dayCurr = curr.day_of_week;
+        const existingIdx = acc.findIndex(
+          (item) =>
+            item.course_code === curr.course_code &&
+            (item.day_of_week === dayCurr ||
+              DAY_MAP[item.day_of_week] === DAY_MAP[dayCurr]),
+        );
+
+        if (existingIdx !== -1) {
+          const parseToMins = (t) => {
+            if (!t) return 0;
+            const parts = String(t).split(":");
+            return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+          };
+          const formatFromMins = (mins) => {
+            const h = Math.floor(mins / 60)
+              .toString()
+              .padStart(2, "0");
+            const m = (mins % 60).toString().padStart(2, "0");
+            return `${h}:${m}`;
+          };
+
+          const ex = acc[existingIdx];
+          const s1 = parseToMins(ex.start_time);
+          const e1 = parseToMins(ex.end_time);
+          const s2 = parseToMins(curr.start_time);
+          const e2 = parseToMins(curr.end_time);
+
+          ex.start_time = formatFromMins(Math.min(s1, s2));
+          ex.end_time = formatFromMins(Math.max(e1, e2));
+        } else {
+          acc.push({ ...curr });
+        }
+        return acc;
+      }, []);
+
+      setScheduleData(merged);
     } catch (e) {
       Alert.alert("Error", e.message);
     } finally {
@@ -54,20 +124,50 @@ export default function CartScreen({ student, setView }) {
     }
   };
 
-  // นับหน่วยกิต (วิชาเดียวนับครั้งเดียว ไม่ว่าจะมีกี่ section)
-  const totalCredits = items.reduce((sum, item) => {
-    return sum + (parseInt(item.credits) || 3);
-  }, 0);
+  const getBoxStyle = (startTime, endTime) => {
+    const parseTime = (t) => {
+      if (!t) return 0;
+      let str = String(t);
+      if (str.includes(":")) {
+        const parts = str.split(":");
+        const h = parseInt(parts[0]);
+        const m = parseInt(parts[1]);
+        return h + m / 60;
+      }
+      return parseFloat(t) || 0;
+    };
+    const s = parseTime(startTime);
+    const e = parseTime(endTime);
+    return {
+      left: (s - GRID_START_HOUR) * ONE_HOUR_WIDTH,
+      width: (e - s) * ONE_HOUR_WIDTH,
+    };
+  };
 
-  const removeItem = (courseCode) => {
+  const formatTimeDisplay = (time) => {
+    if (!time) return "";
+    let str = String(time);
+    if (str.includes(":")) {
+      const parts = str.split(":");
+      return `${parseInt(parts[0])}.${parts[1]}`;
+    }
+    return str;
+  };
+
+  const removeItem = (courseCode, sectionType) => {
     Alert.alert("ลบวิชา", `ต้องการลบ ${courseCode} ออกจากตะกร้าหรือไม่?`, [
       { text: "ยกเลิก", style: "cancel" },
       {
-        text: "ลบ", style: "destructive",
+        text: "ลบ",
+        style: "destructive",
         onPress: async () => {
           try {
-            await removeFromCartAPI(student.student_id, courseCode);
-            setItems((prev) => prev.filter((i) => i.course_code !== courseCode));
+            await removeFromCartAPI(
+              student.student_id,
+              courseCode,
+              sectionType,
+            );
+            fetchCart();
           } catch (e) {
             Alert.alert("ข้อผิดพลาด", e.message);
           }
@@ -95,112 +195,438 @@ export default function CartScreen({ student, setView }) {
   };
 
   return (
-    <SafeAreaView style={sharedStyles.container}>
-      <ScreenHeader title="ตะกร้า" onBack={() => setView("MENU")} />
-
-      {loadingCart ? (
-        <ActivityIndicator size="large" color={COLORS.primary} style={{ marginTop: 50 }} />
-      ) : items.length === 0 ? (
-        <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-          <Feather name="shopping-cart" size={60} color="#ccc" style={{ marginBottom: 15 }} />
-          <Text style={sharedStyles.empty}>ยังไม่มีวิชาในตะกร้า</Text>
+    <LinearGradient colors={["#FFDAE4", "#FFF8F8"]} style={styles.container}>
+      <SafeAreaView style={styles.safeArea}>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity
+            onPress={() => setView("MENU")}
+            style={styles.backButton}
+          >
+            <MaterialIcons name="arrow-back" size={24} color="#7b5455" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>ตะกร้าของฉัน</Text>
+          <TouchableOpacity onPress={fetchCart}>
+            <MaterialIcons name="refresh" size={24} color="#a73355" />
+          </TouchableOpacity>
         </View>
-      ) : (
-        <>
-          {/* สรุปหน่วยกิต */}
-          <View style={{
-            backgroundColor: "#EBF5FB", padding: 12,
-            marginHorizontal: 15, marginTop: 10, borderRadius: 10,
-            flexDirection: "row", justifyContent: "space-between",
-          }}>
-            <Text style={{ color: COLORS.primary, fontWeight: "bold" }}>
-              รวม {items.length} วิชา
-            </Text>
-            <Text style={{ color: COLORS.primary, fontWeight: "bold" }}>
-              ~{totalCredits} หน่วยกิต
-            </Text>
-          </View>
 
-          <FlatList
-            data={items}
-            keyExtractor={(item) => item.course_code}
-            contentContainerStyle={{ padding: 15, paddingBottom: 120 }}
-            renderItem={({ item }) => (
-              <View style={sharedStyles.card}>
-                <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between" }}>
-                  <View style={{ flex: 1 }}>
-                    <CourseBadge code={item.course_code} />
-                    <Text style={{ fontSize: 14, fontWeight: "bold", marginTop: 8, color: "#1A1A1A" }}>
-                      {item.course_name}
-                    </Text>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {loadingCart ? (
+            <ActivityIndicator
+              size="large"
+              color="#a73355"
+              style={{ marginTop: 50 }}
+            />
+          ) : items.length === 0 ? (
+            <View style={styles.emptyBox}>
+              <MaterialIcons name="shopping-cart" size={80} color="#d6c2c4" />
+              <Text style={styles.emptyText}>ยังไม่มีวิชาในตะกร้า</Text>
+            </View>
+          ) : (
+            <>
+              {/* 🗓️ Grid Preview (แก้ให้เลื่อนได้เหมือน ScheduleScreen) */}
+              <View style={styles.gridOuterContainer}>
+                <ScrollView
+                  horizontal={true}
+                  showsHorizontalScrollIndicator={true}
+                >
+                  {/* 🌟 บวก +100px หลอกระบบให้เลื่อนได้ */}
+                  <View
+                    style={{ width: TOTAL_GRID_WIDTH + DAY_COLUMN_WIDTH + 100 }}
+                  >
+                    {/* Time Labels */}
+                    <View style={styles.timeHeaderRow}>
+                      <View style={{ width: DAY_COLUMN_WIDTH }} />
 
-                    {/* ✅ แสดงแต่ละ section พร้อม badge T/L */}
-                    {item.sections.map((sec, idx) => {
-                      const isT = sec.section_type === "T";
-                      return (
-                        <View key={idx} style={{ marginTop: 8, paddingTop: 8, borderTopWidth: idx === 0 ? 0 : 1, borderTopColor: "#F0F0F0" }}>
-                          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                            {/* Section number */}
-                            <Text style={{ fontSize: 13, color: "#555", fontWeight: "500" }}>
-                              Sec {sec.section_number}
-                            </Text>
-                            {/* ✅ Badge T/L */}
-                            <View style={{
-                              paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6,
-                              backgroundColor: isT ? "#FDEEF4" : "#E8F0FE",
-                            }}>
-                              <Text style={{
-                                fontSize: 11, fontWeight: "bold",
-                                color: isT ? "#a73355" : "#1a73e8",
-                              }}>
-                                {isT ? "Theory (T)" : "Lab (L)"}
-                              </Text>
-                            </View>
-                          </View>
-                          {/* เวลาเรียน */}
-                          {sec.time_info ? (
-                            <Text style={{ color: COLORS.primary, marginTop: 3, fontSize: 12 }}>
-                              <Feather name="clock" size={11} /> {sec.time_info}
-                            </Text>
-                          ) : null}
-                        </View>
-                      );
-                    })}
-
-                    {/* แจ้งเตือนถ้าวิชามี T+L แต่ยังเลือกไม่ครบ */}
-                    {item.sections.length === 1 && (
-                      <View style={{ marginTop: 6, flexDirection: "row", alignItems: "center", gap: 4 }}>
-                        <Feather name="alert-circle" size={12} color="#FF9800" />
-                        <Text style={{ fontSize: 11, color: "#FF9800" }}>
-                          ยังไม่ได้เลือก {item.sections[0].section_type === "T" ? "Lab (L)" : "Theory (T)"}
-                        </Text>
+                      <View
+                        style={{
+                          flex: 1,
+                          flexDirection: "row",
+                          position: "relative",
+                        }}
+                      >
+                        {Array.from(
+                          { length: COLUMN_COUNT + 1 },
+                          (_, i) => GRID_START_HOUR + i,
+                        ).map((h, i) => (
+                          <Text
+                            key={h}
+                            style={[
+                              styles.timeLabel,
+                              {
+                                position: "absolute",
+                                left: i * ONE_HOUR_WIDTH - 10,
+                                width: 20,
+                                textAlign: "center",
+                              },
+                            ]}
+                          >
+                            {h}
+                          </Text>
+                        ))}
                       </View>
+                    </View>
+
+                    {/* Day Rows */}
+                    {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(
+                      (dayKey) => (
+                        <View key={dayKey} style={styles.dayRow}>
+                          <View style={styles.dayLabelContainer}>
+                            {/* 🌟 แสดงชื่อวันแบบเต็ม "วันจันทร์" */}
+                            <Text style={styles.dayTextTh}>
+                              วัน{DAY_MAP[dayKey]}
+                            </Text>
+                          </View>
+                          <View
+                            style={[
+                              styles.gridContent,
+                              { width: TOTAL_GRID_WIDTH },
+                            ]}
+                          >
+                            {/* เส้นแบ่งเวลาแนวตั้ง */}
+                            {Array.from({ length: COLUMN_COUNT + 1 }).map(
+                              (_, i) => (
+                                <View
+                                  key={i}
+                                  style={[
+                                    styles.vLine,
+                                    { left: i * ONE_HOUR_WIDTH },
+                                  ]}
+                                />
+                              ),
+                            )}
+
+                            {/* วิชาที่เรียนในวันนี้ */}
+                            {scheduleData
+                              .filter((course) => {
+                                const d = course.day_of_week;
+                                return (
+                                  d === dayKey || DAY_MAP[d] === DAY_MAP[dayKey]
+                                );
+                              })
+                              .map((item, idx) => {
+                                const pos = getBoxStyle(
+                                  item.start_time,
+                                  item.end_time,
+                                );
+                                return (
+                                  <View
+                                    key={`${item.course_code}-${idx}`}
+                                    style={[
+                                      styles.courseBox,
+                                      {
+                                        left: pos.left + 1,
+                                        width: pos.width - 2,
+                                      },
+                                    ]}
+                                  >
+                                    <Text
+                                      style={styles.boxCode}
+                                      numberOfLines={1}
+                                    >
+                                      {item.course_code}
+                                    </Text>
+                                    {/* 🌟 แสดงเวลาแบบ 9.00-11.00 */}
+                                    <Text
+                                      style={styles.boxTime}
+                                      numberOfLines={1}
+                                    >
+                                      {formatTimeDisplay(item.start_time)}-
+                                      {formatTimeDisplay(item.end_time)}
+                                    </Text>
+                                  </View>
+                                );
+                              })}
+                          </View>
+                        </View>
+                      ),
                     )}
                   </View>
-
-                  {/* ปุ่มลบ */}
-                  <TouchableOpacity
-                    style={{ padding: 10, backgroundColor: "#FCEBEA", borderRadius: 8, marginLeft: 8 }}
-                    onPress={() => removeItem(item.course_code)}
-                  >
-                    <Feather name="trash-2" size={20} color={COLORS.danger} />
-                  </TouchableOpacity>
-                </View>
+                </ScrollView>
               </View>
-            )}
-          />
 
-          <View style={sharedStyles.bottomBar}>
-            <TouchableOpacity
-              style={[sharedStyles.actionButton, { backgroundColor: COLORS.success }]}
-              onPress={confirmRegistration}
-            >
-              <Feather name="check-circle" size={20} color="#fff" />
-              <Text style={sharedStyles.actionButtonText}>ยืนยันการลงทะเบียน</Text>
-            </TouchableOpacity>
-          </View>
-        </>
-      )}
-    </SafeAreaView>
+              {/* Course Detail List */}
+              <Text style={styles.sectionTitle}>รายละเอียดวิชา</Text>
+              {items.map((item, idx) => {
+                const dayStr = item.day_of_week || "";
+                const startTime = item.start_time
+                  ? item.start_time.substring(0, 5)
+                  : "";
+                const endTime = item.end_time
+                  ? item.end_time.substring(0, 5)
+                  : "";
+
+                return (
+                  <View
+                    key={`${item.course_code || item.course_id}-${item.section_type}-${idx}`}
+                    style={styles.detailCard}
+                  >
+                    <View style={styles.cardAccent} />
+
+                    <View style={styles.cardBody}>
+                      <View style={styles.cardTop}>
+                        <Text style={styles.detailCode}>
+                          {item.course_code || item.course_id} Sec{" "}
+                          {item.section_number || "1"}{" "}
+                          {item.section_type ? `(${item.section_type})` : ""}
+                        </Text>
+                        <Text style={styles.detailTime}>
+                          {dayStr && startTime
+                            ? `วัน${DAY_MAP[dayStr] || dayStr} ${startTime}-${endTime} น.`
+                            : "ไม่มีข้อมูลเวลาเรียน"}
+                        </Text>
+                      </View>
+
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                        }}
+                      >
+                        <Text style={styles.courseName} numberOfLines={1}>
+                          {item.course_name}
+                        </Text>
+                        <TouchableOpacity
+                          onPress={() =>
+                            removeItem(
+                              item.course_code || item.course_id,
+                              item.section_type,
+                            )
+                          }
+                          style={{ padding: 4 }}
+                        >
+                          <Feather name="trash-2" size={18} color="#E53935" />
+                        </TouchableOpacity>
+                      </View>
+
+                      <View style={styles.cardBottom}>
+                        <Text style={styles.metaText}>
+                          {item.credits
+                            ? `${item.credits} หน่วยกิต`
+                            : "ไม่ระบุหน่วยกิต"}
+                        </Text>
+                        <Text style={styles.metaText}>
+                          {item.section_type === "T"
+                            ? "ทฤษฎี"
+                            : item.section_type === "L"
+                              ? "ปฏิบัติ"
+                              : ""}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                );
+              })}
+
+              {/* Confirm Button */}
+              <TouchableOpacity
+                style={styles.confirmButton}
+                onPress={confirmRegistration}
+              >
+                <LinearGradient
+                  colors={["#a73355", "#7b1d3a"]}
+                  style={styles.gradientButton}
+                >
+                  <MaterialIcons name="check-circle" size={24} color="white" />
+                  <Text style={styles.confirmButtonText}>
+                    ยืนยันการลงทะเบียน
+                  </Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </>
+          )}
+        </ScrollView>
+
+        {/* Floating Bottom Nav */}
+        <View style={styles.bottomNav}>
+          <TouchableOpacity
+            style={styles.navItem}
+            onPress={() => setView("MENU")}
+          >
+            <MaterialIcons name="home" size={24} color="#837375" />
+            <Text style={styles.navText}>HOME</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.navItem}
+            onPress={() => setView("MANUAL")}
+          >
+            <MaterialIcons name="search" size={24} color="#837375" />
+            <Text style={styles.navText}>SEARCH</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.navItemActive}>
+            <MaterialIcons name="shopping-cart" size={24} color="#a73355" />
+            <Text style={styles.navTextActive}>CART</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.navItem}
+            onPress={() => setView("SCHEDULE")}
+          >
+            <MaterialIcons name="calendar-today" size={24} color="#837375" />
+            <Text style={styles.navText}>SCHEDULE</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    </LinearGradient>
   );
 }
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  safeArea: { flex: 1 },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: 20,
+  },
+  headerTitle: { fontSize: 20, fontWeight: "900", color: "#7b5455" },
+  backButton: { padding: 8, backgroundColor: "white", borderRadius: 12 },
+  scrollContent: { paddingHorizontal: 16, paddingBottom: 150 },
+
+  gridOuterContainer: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+    paddingVertical: 10,
+    marginBottom: 24,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#F0F0F0",
+    elevation: 3,
+  },
+  timeHeaderRow: { flexDirection: "row", height: 24, alignItems: "center" },
+  timeLabel: { fontSize: 9, color: "#A0A0A0", fontWeight: "500" },
+  dayRow: {
+    flexDirection: "row",
+    height: 42,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F5F5F5",
+  },
+  dayLabelContainer: {
+    width: DAY_COLUMN_WIDTH,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#FFFBFB",
+    borderRightWidth: 1,
+    borderRightColor: "#F5F5F5",
+  },
+  dayTextTh: { fontSize: 8, fontWeight: "bold", color: "#514345" },
+  gridContent: { position: "relative" },
+  vLine: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    width: 1,
+    backgroundColor: "#F5F5F5",
+  },
+  courseBox: {
+    position: "absolute",
+    top: 4,
+    bottom: 4,
+    backgroundColor: "#FFAEB5",
+    borderRadius: 4,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 0,
+  },
+  
+  boxCode: { fontSize: 7, fontWeight: "bold", color: "#333333" },
+  boxTime: { fontSize: 6, color: "#666666", marginTop: 1 },
+
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#1f1a1c",
+    marginBottom: 12,
+  },
+  detailCard: {
+    flexDirection: "row",
+    backgroundColor: "#FFF9FA",
+    borderRadius: 16,
+    marginBottom: 10,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#FEE2E2",
+    elevation: 2,
+  },
+  cardAccent: { width: 5, backgroundColor: "#ffadaf" },
+  cardBody: { flex: 1, padding: 12 },
+  cardTop: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 4,
+  },
+  detailCode: { fontSize: 14, fontWeight: "bold", color: "#1f1a1c" },
+  detailTime: { fontSize: 11, color: "#837375" },
+  courseName: { fontSize: 13, color: "#514345", marginBottom: 8, flex: 1 },
+  cardBottom: { flexDirection: "row", justifyContent: "space-between" },
+  metaText: { fontSize: 11, color: "#837375" },
+
+  confirmButton: {
+    marginTop: 10,
+    borderRadius: 16,
+    overflow: "hidden",
+    elevation: 5,
+  },
+  gradientButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 16,
+    gap: 10,
+  },
+  confirmButtonText: {
+    color: "white",
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+
+  bottomNav: {
+    position: "absolute",
+    bottom: 20,
+    left: 16,
+    right: 16,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "#ffffff",
+    borderRadius: 40,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    shadowColor: "#a73355",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.1,
+    shadowRadius: 20,
+    elevation: 10,
+    zIndex: 30,
+  },
+  navItem: { alignItems: "center", paddingHorizontal: 8, paddingVertical: 10 },
+  navItemActive: {
+    alignItems: "center",
+    backgroundColor: "#FDEEF4",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 24,
+  },
+  navText: {
+    fontSize: 9,
+    fontWeight: "bold",
+    color: "#837375",
+    marginTop: 4,
+    letterSpacing: 0.5,
+  },
+  navTextActive: {
+    fontSize: 9,
+    fontWeight: "bold",
+    color: "#a73355",
+    marginTop: 4,
+    letterSpacing: 0.5,
+  },
+
+  emptyBox: { alignItems: "center", marginTop: 100 },
+  emptyText: { fontSize: 16, color: "#837375", marginTop: 10 },
+});

@@ -1,128 +1,300 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, ScrollView, Image, Modal, ActivityIndicator } from 'react-native';
-import { MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
+import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, ScrollView, Modal, ActivityIndicator, Alert } from 'react-native';
+import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { batchAddRequiredAPI } from '../api';
+import { getSuggestedCoursesAPI, batchAddWithCheckAPI, getCartAPI } from '../api';
+
+const DAY_MAP = { Mon: "จันทร์", Tue: "อังคาร", Wed: "พุธ", Thu: "พฤหัสบดี", Fri: "ศุกร์", Sat: "เสาร์", Sun: "อาทิตย์" };
 
 export default function RegistrationScreen({ student, setView }) {
   const [courses, setCourses] = useState([]);
+  const [cartCourseCodes, setCartCourseCodes] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [selectedData, setSelectedData] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
-  // 🌟 State สำหรับเปิด/ปิด ป๊อปอัป (Modal)
-  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [conflictData, setConflictData] = useState(null);
 
   useEffect(() => {
-    // จำลองการดึงข้อมูล
-    setTimeout(() => {
-      setCourses([
-        { code: 'CPE407', credits: 3, name: 'เครือข่ายสื่อสารคอมพิวเตอร์', seatsLeft: 12, theory: 'Sec 002 | Fri 09:00 - 10:40', lab: 'Sec 002 | Fri 13:00 - 15:30' },
-        { code: 'CPE495', credits: 3, name: 'หัวข้อพิเศษวิศวกรรมคอมพิวเตอร์', seatsLeft: 5, theory: 'Sec 001 | Mon 09:00 - 11:30', lab: null },
-        { code: 'CPE451', credits: 3, name: 'โปรแกรมประยุกต์', seatsLeft: 20, theory: 'Sec 002 | Tue 11:00 - 12:40', lab: 'Sec 002 | Tue 13:00 - 15:30' },
-        { code: 'CPE408', credits: 3, name: 'เครือข่ายสื่อสารคอมพิวเตอร์', seatsLeft: 8, theory: 'Sec 001 | Sat 09:00 - 10:40', lab: 'Sec 001 | Sat 13:00 - 15:30' },
-      ]);
-      setLoading(false);
-    }, 800);
+    fetchData();
   }, []);
 
-  const handleProcessRegistration = async () => {
+  const fetchData = async () => {
+    try {
+      // 1. ดึงข้อมูลวิชาที่อยู่ในตะกร้าปัจจุบันมาเก็บไว้เช็ค
+      const cart = await getCartAPI(student.student_id);
+      const cartCodes = cart.map(c => c.course_code || c.course_id);
+      setCartCourseCodes(cartCodes);
+
+      // 2. ดึงวิชาที่แนะนำ
+      const data = await getSuggestedCoursesAPI(student.student_id);
+      setCourses(data);
+      
+      // Auto-select วิชาที่ยังไม่มีในตะกร้า
+      const initSelect = {};
+      data.forEach(c => {
+        let firstT = null;
+        let firstL = null;
+        Object.keys(c.sections).forEach(secNum => {
+          c.sections[secNum].forEach(slot => {
+            if (slot.section_type === 'T' && !firstT) firstT = secNum;
+            if (slot.section_type === 'L' && !firstL) firstL = secNum;
+          });
+        });
+
+        // ถ้ายังไม่มีในตะกร้า ให้ตั้งค่าเริ่มต้นให้
+        if (!cartCodes.includes(c.course_code)) {
+          initSelect[c.course_code] = { checked: true, secT: firstT, secL: firstL };
+        }
+      });
+      setSelectedData(initSelect);
+    } catch (e) {
+      Alert.alert("ข้อผิดพลาด", e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleCheck = (code) => {
+    // เช็คเงื่อนไข: ถ้ามีในตะกร้าแล้ว ห้ามกดเลือกเด็ดขาด
+    if (cartCourseCodes.includes(code)) {
+      Alert.alert("ไม่สามารถเพิ่มได้", `รายวิชา ${code} มีอยู่ในตะกร้าของคุณแล้ว`);
+      return;
+    }
+
+    setSelectedData(prev => ({
+      ...prev,
+      [code]: { ...prev[code], checked: !prev[code]?.checked }
+    }));
+  };
+
+  const changeSection = (code, typeField, sec) => {
+    setSelectedData(prev => ({
+      ...prev,
+      [code]: { ...prev[code], [typeField]: sec }
+    }));
+  };
+
+  const handleRegister = async () => {
+    const items = [];
+    Object.entries(selectedData).forEach(([code, val]) => {
+      if (val.checked) {
+        // แยกส่ง T และ L เป็นคนละก้อน ทำให้เลือก Sec สลับกันได้
+        if (val.secT) items.push({ course_code: code, section_number: val.secT, section_type: 'T' });
+        if (val.secL) items.push({ course_code: code, section_number: val.secL, section_type: 'L' });
+      }
+    });
+      
+    if (items.length === 0) {
+      Alert.alert("แจ้งเตือน", "กรุณาเลือกอย่างน้อย 1 วิชา");
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      await batchAddRequiredAPI(student.student_id);
-      setShowConfirmModal(false);
-      // ไปหน้าตะกร้าทันทีหลังสำเร็จ
-      setView('CART');
-    } catch (error) {
-      alert("เกิดข้อผิดพลาด: " + error.message);
+      const res = await batchAddWithCheckAPI(student.student_id, items);
+      if (res.status === "conflict") {
+        setConflictData(res.conflicts); 
+      } else {
+        Alert.alert("สำเร็จ", "เพิ่มวิชาลงตะกร้าเรียบร้อยแล้ว!");
+        setView("CART");
+      }
+    } catch (e) {
+      Alert.alert("ข้อผิดพลาด", e.message);
+    } finally {
       setIsSubmitting(false);
     }
   };
 
+  const resolveConflict = (course_code, section_type, suggested_section) => {
+    if (!suggested_section) {
+      // ไม่มี Sec ว่างให้ติ๊กวิชานี้ออกไปเลย
+      setSelectedData(prev => ({ ...prev, [course_code]: { ...prev[course_code], checked: false } }));
+    } else {
+      // เปลี่ยนไปใช้ Sec ที่ไม่ชน
+      const typeField = section_type === 'T' ? 'secT' : 'secL';
+      setSelectedData(prev => ({ ...prev, [course_code]: { ...prev[course_code], [typeField]: suggested_section } }));
+    }
+    
+    setConflictData(prev => {
+      const remaining = prev.filter(c => !(c.course_code === course_code && c.section_type === section_type));
+      if (remaining.length === 0) return null; 
+      return remaining;
+    });
+  };
+
   return (
-    <LinearGradient colors={['#FDEEF4', '#FFF8F8']} style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        
-        {/* Header */}
+    <LinearGradient colors={['#FFDAE4', '#FFF8F8']} style={styles.container}>
+      <SafeAreaView style={{ flex: 1 }}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => setView('MENU')} style={styles.backButton}>
-            <MaterialIcons name="arrow-back" size={24} color="#a73355" />
+          <TouchableOpacity onPress={() => setView("MENU")} style={styles.backButton}>
+            <MaterialIcons name="arrow-back" size={24} color="#7b5455" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>ลงทะเบียนวิชาภาคฯ ยกชุด</Text>
-          <View style={{ width: 40 }} />
+          <Text style={styles.headerTitle}>ลงทะเบียนยกภาค</Text>
+          <TouchableOpacity onPress={fetchData}>
+             <MaterialIcons name="refresh" size={24} color="#a73355" />
+          </TouchableOpacity>
         </View>
 
         {loading ? (
-           <View style={styles.center}>
-             <ActivityIndicator size="large" color="#D23669" />
-           </View>
+          <ActivityIndicator size="large" color="#a73355" style={{ marginTop: 100 }} />
         ) : (
-          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        
+          <ScrollView contentContainerStyle={styles.scrollContent}>
+            <Text style={styles.infoText}>วิชาแนะนำสำหรับสาขา {student?.major || ""}</Text>
+            
+            {courses.length === 0 ? (
+              <Text style={{textAlign: 'center', marginTop: 50, color: '#837375'}}>ไม่มีวิชาแนะนำในชั้นปีนี้</Text>
+            ) : (
+              courses.map(item => {
+                const inCart = cartCourseCodes.includes(item.course_code);
+                const selected = selectedData[item.course_code] || {};
 
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>รายชื่อวิชาภาคฯ (Series)</Text>
-              <View style={styles.badgeCount}><Text style={styles.badgeCountText}>{courses.length} รายวิชา</Text></View>
-            </View>
+                // ค้นหา Sec ที่มี T และ L มาแยกกัน
+                const tSecs = [];
+                const lSecs = [];
+                Object.keys(item.sections).forEach(secNum => {
+                  item.sections[secNum].forEach(slot => {
+                    if (slot.section_type === 'T' && !tSecs.includes(secNum)) tSecs.push(secNum);
+                    if (slot.section_type === 'L' && !lSecs.includes(secNum)) lSecs.push(secNum);
+                  });
+                });
 
-            {courses.map((course, idx) => (
-              <View key={idx} style={styles.courseCard}>
-                <View style={styles.courseHeader}>
-                  <Text style={styles.courseCode}>{course.code} • {course.credits} CREDITS</Text>
-                  <View style={styles.seatsBadge}><Text style={styles.seatsText}>{course.seatsLeft} Left</Text></View>
-                </View>
-                <Text style={styles.courseName}>{course.name}</Text>
-                <View style={styles.timeRow}><MaterialIcons name="menu-book" size={12} color="#D23669" /><Text style={styles.timeText}>Theory: {course.theory}</Text></View>
-                {course.lab && <View style={styles.timeRow}><MaterialIcons name="science" size={12} color="#D23669" /><Text style={styles.timeText}>Lab: {course.lab}</Text></View>}
-              </View>
-            ))}
+                return (
+                  <View key={item.course_code} style={[styles.courseCard, inCart && { opacity: 0.6 }]}>
+                    
+                    {/* ส่วนหัว Card: ถ้ารายวิชามีในตะกร้าจะโชว์รูปกุญแจแดง */}
+                    <TouchableOpacity style={styles.cardHeader} onPress={() => toggleCheck(item.course_code)} activeOpacity={inCart ? 1 : 0.7}>
+                      <MaterialIcons 
+                        name={inCart ? "lock" : (selected.checked ? "check-box" : "check-box-outline-blank")} 
+                        size={26} 
+                        color={inCart ? "#E53935" : (selected.checked ? "#a73355" : "#ccc")} 
+                      />
+                      <View style={{ flex: 1, marginLeft: 10 }}>
+                        <Text style={[styles.courseCode, inCart && { color: '#E53935' }]}>
+                          {item.course_code}
+                          {inCart && <Text style={{fontSize: 10, color: '#E53935'}}> (มีในตะกร้าแล้ว)</Text>}
+                        </Text>
+                        <Text style={styles.courseName}>{item.course_name}</Text>
+                      </View>
+                      <Text style={styles.credits}>{item.credits} หน่วยกิต</Text>
+                    </TouchableOpacity>
+                    
+                    {/* ส่วนเลือก Section และแสดงเวลา */}
+                    {selected.checked && !inCart && (
+                      <View style={styles.sectionContainer}>
+                        
+                        {/* เลือก ทฤษฎี (T) */}
+                        {tSecs.length > 0 && (
+                          <View style={{ marginBottom: 10 }}>
+                            <Text style={styles.secTitle}>ทฤษฎี (T):</Text>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row' }}>
+                              {tSecs.map(sec => (
+                                <TouchableOpacity 
+                                  key={`T-${sec}`} 
+                                  style={[styles.secChip, selected.secT === sec && styles.secChipActive]}
+                                  onPress={() => changeSection(item.course_code, 'secT', sec)}
+                                >
+                                  <Text style={[styles.secChipText, selected.secT === sec && styles.secChipTextActive]}>Sec {sec}</Text>
+                                </TouchableOpacity>
+                              ))}
+                            </ScrollView>
+                          </View>
+                        )}
 
-            <View style={styles.infoBox}>
-              <MaterialIcons name="info-outline" size={20} color="#a73355" />
-              <Text style={styles.infoText}>กรุณาตรวจสอบเวลาเรียนที่ซ้อนทับกันก่อนยืนยันการจองที่นั่ง</Text>
-            </View>
+                        {/* เลือก ปฏิบัติ (L) */}
+                        {lSecs.length > 0 && (
+                          <View style={{ marginBottom: 10 }}>
+                            <Text style={styles.secTitle}>ปฏิบัติ (L):</Text>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row' }}>
+                              {lSecs.map(sec => (
+                                <TouchableOpacity 
+                                  key={`L-${sec}`} 
+                                  style={[styles.secChip, selected.secL === sec && styles.secChipActive]}
+                                  onPress={() => changeSection(item.course_code, 'secL', sec)}
+                                >
+                                  <Text style={[styles.secChipText, selected.secL === sec && styles.secChipTextActive]}>Sec {sec}</Text>
+                                </TouchableOpacity>
+                              ))}
+                            </ScrollView>
+                          </View>
+                        )}
+                        
+                        {/* กล่องสรุปเวลาเรียน */}
+                        <View style={styles.timeBox}>
+                          {selected.secT && item.sections[selected.secT]?.filter(s => s.section_type === 'T').map((t, i) => (
+                            <Text key={`time-T-${i}`} style={styles.timeText}>
+                              • [ทฤษฎี Sec {selected.secT}] วัน{DAY_MAP[t.day_of_week] || t.day_of_week} {t.start_time}-{t.end_time}
+                            </Text>
+                          ))}
+                          {selected.secL && item.sections[selected.secL]?.filter(s => s.section_type === 'L').map((t, i) => (
+                            <Text key={`time-L-${i}`} style={styles.timeText}>
+                              • [ปฏิบัติ Sec {selected.secL}] วัน{DAY_MAP[t.day_of_week] || t.day_of_week} {t.start_time}-{t.end_time}
+                            </Text>
+                          ))}
+                        </View>
+                      </View>
+                    )}
+                  </View>
+                );
+              })
+            )}
           </ScrollView>
         )}
 
-        {/* ⚡ ปุ่มกดยืนยัน (เพื่อเปิด Modal) */}
-        <View style={styles.bottomContainer}>
-          <TouchableOpacity style={styles.confirmBtn} onPress={() => setShowConfirmModal(true)}>
-            <LinearGradient colors={['#D23669', '#a73355']} style={styles.confirmGradient} start={{x: 0, y: 0}} end={{x: 1, y: 0}}>
-              <FontAwesome5 name="bolt" size={18} color="white" style={{ marginRight: 8 }} />
-              <Text style={styles.confirmBtnText}>ยืนยันลงทะเบียนคลิกเดียว</Text>
+        <View style={styles.bottomArea}>
+          <TouchableOpacity style={styles.confirmBtn} onPress={handleRegister} disabled={isSubmitting}>
+            <LinearGradient colors={['#a73355', '#7b1d3a']} style={styles.confirmGradient}>
+              {isSubmitting ? (
+                <ActivityIndicator color="white" />
+              ) : (
+                <>
+                  <Feather name="plus-circle" size={20} color="white" style={{ marginRight: 8 }} />
+                  <Text style={styles.confirmBtnText}>เพิ่มวิชาทั้งหมดลงตะกร้า</Text>
+                </>
+              )}
             </LinearGradient>
           </TouchableOpacity>
         </View>
 
-        {/* 🌟 ส่วนที่เอาไปใส่ (วางไว้ก่อนบรรทัดสุดท้ายของไฟล์) */}
-        <Modal transparent visible={showConfirmModal} animationType="fade">
+        {/* 🚨 MODAL เตือนตารางชน 🚨 */}
+        <Modal visible={!!conflictData} transparent animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
               <View style={styles.modalIconContainer}>
-                <LinearGradient colors={['#FFDAE4', '#FDEEF4']} style={styles.modalIconCircle}>
-                  {/* แก้เป็น name="check" เรียบร้อยแล้ว (ติ๊กเดียว) */}
-                  <FontAwesome5 name="check" size={28} color="#D23669" />
-                </LinearGradient>
+                <View style={styles.modalIconCircle}>
+                  <MaterialIcons name="event-busy" size={40} color="#FFF" />
+                </View>
               </View>
+              <Text style={styles.modalTitle}>ตรวจพบเวลาเรียนชนกัน!</Text>
+              <Text style={styles.modalDesc}>กรุณาตรวจสอบและแก้ไข Section ด้านล่างนี้</Text>
               
-              <Text style={styles.modalTitle}>ยืนยันรายการ</Text>
-              <Text style={styles.modalDesc}>
-                ระบบจะทำการเพิ่มวิชาทั้งชุด <Text style={{fontWeight: 'bold', color: '#D23669'}}>{courses.length} รายวิชา</Text> ลงในตะกร้าของคุณทันที ยืนยันหรือไม่?
-              </Text>
+              <ScrollView style={{ width: '100%', maxHeight: 250 }}>
+                {conflictData?.map((c, i) => (
+                  <View key={i} style={styles.conflictCard}>
+                    <Text style={styles.conflictCourse}>{c.course_code} ({c.section_type === 'T' ? 'ทฤษฎี' : 'ปฏิบัติ'} Sec {c.requested_section})</Text>
+                    <Text style={styles.conflictSubtitle}>ชนกับวิชาในตะกร้า</Text>
+                    
+                    {c.suggested_section ? (
+                      <TouchableOpacity style={styles.suggestBtn} onPress={() => resolveConflict(c.course_code, c.section_type, c.suggested_section)}>
+                        <MaterialIcons name="autorenew" size={16} color="white" style={{marginRight:5}}/>
+                        <Text style={{ color: '#fff', fontSize: 13, fontWeight: 'bold' }}>เปลี่ยนเป็น Sec {c.suggested_section} ที่ไม่ชน</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity style={styles.removeBtn} onPress={() => resolveConflict(c.course_code, c.section_type, null)}>
+                        <MaterialIcons name="delete" size={16} color="white" style={{marginRight:5}}/>
+                        <Text style={{ color: '#fff', fontSize: 13, fontWeight: 'bold' }}>ยกเลิกการลงวิชานี้ (ไม่มี Sec ว่าง)</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ))}
+              </ScrollView>
 
-              <View style={styles.modalButtonRow}>
-                <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setShowConfirmModal(false)}>
-                  <Text style={styles.modalCancelText}>ยกเลิก</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.modalConfirmBtn} onPress={handleProcessRegistration} disabled={isSubmitting}>
-                  <LinearGradient colors={['#D23669', '#a73355']} style={styles.modalConfirmGradient}>
-                    {isSubmitting ? <ActivityIndicator color="white" /> : <Text style={styles.modalConfirmText}>ตกลง</Text>}
-                  </LinearGradient>
-                </TouchableOpacity>
-              </View>
+              <TouchableOpacity style={{ marginTop: 20 }} onPress={() => setConflictData(null)}>
+                <Text style={{ color: '#837375', fontWeight: 'bold' }}>ปิดหน้าต่าง</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </Modal>
+
       </SafeAreaView>
     </LinearGradient>
   );
@@ -130,53 +302,44 @@ export default function RegistrationScreen({ student, setView }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  safeArea: { flex: 1 },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 10 },
-  backButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(210, 54, 105, 0.1)', justifyContent: 'center', alignItems: 'center' },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#1f1a1c' },
-  scrollContent: { paddingHorizontal: 20, paddingBottom: 150 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20 },
+  headerTitle: { fontSize: 20, fontWeight: '900', color: '#7b5455' },
+  backButton: { padding: 8, backgroundColor: 'white', borderRadius: 12 },
+  scrollContent: { paddingHorizontal: 16, paddingBottom: 120 },
+  infoText: { fontSize: 14, color: '#837375', marginBottom: 15, fontWeight: 'bold' },
   
-  profileSection: { flexDirection: 'row', alignItems: 'center', gap: 16, marginTop: 10, marginBottom: 25 },
-  profileImageContainer: { position: 'relative' },
-  profileImage: { width: 60, height: 60, borderRadius: 30, borderWidth: 2, borderColor: 'white' },
-  statusDot: { position: 'absolute', bottom: 2, right: 2, width: 14, height: 14, backgroundColor: '#22c55e', borderRadius: 7, borderWidth: 2, borderColor: '#fff' },
-  welcomeSubText: { fontSize: 11, color: '#514345', fontWeight: 'bold' },
-  welcomeText: { fontSize: 22, fontWeight: '900', color: '#1f1a1c' },
+  courseCard: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 12, elevation: 2 },
+  cardHeader: { flexDirection: 'row', alignItems: 'center' },
+  courseCode: { fontSize: 16, fontWeight: 'bold', color: '#1f1a1c' },
+  courseName: { fontSize: 12, color: '#837375', marginTop: 2 },
+  credits: { fontSize: 14, fontWeight: 'bold', color: '#a73355' },
+  
+  sectionContainer: { marginTop: 15, paddingTop: 15, borderTopWidth: 1, borderTopColor: '#f0f0f0' },
+  secTitle: { fontSize: 12, fontWeight: 'bold', color: '#514345', marginBottom: 5 },
+  secChip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: '#f5f5f5', marginRight: 8, borderWidth: 1, borderColor: '#e0e0e0' },
+  secChipActive: { backgroundColor: '#FDEEF4', borderColor: '#a73355' },
+  secChipText: { fontSize: 12, color: '#837375', fontWeight: 'bold' },
+  secChipTextActive: { color: '#a73355' },
+  
+  timeBox: { backgroundColor: '#F9F9F9', padding: 10, borderRadius: 8 },
+  timeText: { fontSize: 12, color: '#514345', marginBottom: 4, fontWeight: 'bold' },
 
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#1f1a1c' },
-  badgeCount: { backgroundColor: 'rgba(210, 54, 105, 0.1)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
-  badgeCountText: { fontSize: 10, fontWeight: 'bold', color: '#a73355' },
-
-  courseCard: { backgroundColor: 'white', borderRadius: 20, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: 'rgba(210, 54, 105, 0.1)', elevation: 1 },
-  courseHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
-  courseCode: { fontSize: 11, fontWeight: '900', color: '#a73355' },
-  seatsBadge: { backgroundColor: '#FFF0F0', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
-  seatsText: { fontSize: 9, fontWeight: 'bold', color: '#D23669' },
-  courseName: { fontSize: 14, fontWeight: 'bold', color: '#514345', marginBottom: 12 },
-  timeRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
-  timeText: { fontSize: 11, color: '#837375' },
-
-  infoBox: { flexDirection: 'row', backgroundColor: 'rgba(210, 54, 105, 0.05)', padding: 16, borderRadius: 16, gap: 10 },
-  infoText: { flex: 1, fontSize: 11, color: '#514345', lineHeight: 18 },
-
-  bottomContainer: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'white', padding: 20, borderTopLeftRadius: 30, borderTopRightRadius: 30, elevation: 20 },
+  bottomArea: { position: 'absolute', bottom: 0, width: '100%', backgroundColor: 'white', padding: 20, borderTopLeftRadius: 30, borderTopRightRadius: 30, elevation: 20 },
   confirmBtn: { borderRadius: 16, overflow: 'hidden' },
   confirmGradient: { paddingVertical: 18, justifyContent: 'center', alignItems: 'center', flexDirection: 'row' },
   confirmBtnText: { color: 'white', fontSize: 16, fontWeight: 'bold' },
 
-  // 🌟 MODAL STYLES (ส่วนที่ทำให้ป๊อปอัปสวยขึ้น)
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 30 },
-  modalContent: { backgroundColor: 'white', borderRadius: 30, padding: 24, width: '100%', alignItems: 'center' },
-  modalIconContainer: { marginTop: -60, marginBottom: 20 },
-  modalIconCircle: { width: 80, height: 80, borderRadius: 40, justifyContent: 'center', alignItems: 'center', elevation: 5 },
-  modalTitle: { fontSize: 20, fontWeight: '900', color: '#1f1a1c', marginBottom: 10 },
-  modalDesc: { fontSize: 14, color: '#514345', textAlign: 'center', lineHeight: 22, marginBottom: 25 },
-  modalButtonRow: { flexDirection: 'row', gap: 12, width: '100%' },
-  modalCancelBtn: { flex: 1, paddingVertical: 15, alignItems: 'center', borderRadius: 15, backgroundColor: '#F3F4F6' },
-  modalCancelText: { color: '#6B7280', fontWeight: 'bold' },
-  modalConfirmBtn: { flex: 1, borderRadius: 15, overflow: 'hidden' },
-  modalConfirmGradient: { paddingVertical: 15, alignItems: 'center', justifyContent: 'center' },
-  modalConfirmText: { color: 'white', fontWeight: 'bold' }
+  // MODAL STYLES
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalContent: { backgroundColor: 'white', borderRadius: 24, padding: 24, width: '100%', alignItems: 'center' },
+  modalIconContainer: { marginTop: -50, marginBottom: 10 },
+  modalIconCircle: { width: 70, height: 70, borderRadius: 35, backgroundColor: '#E53935', justifyContent: 'center', alignItems: 'center', elevation: 5 },
+  modalTitle: { fontSize: 18, fontWeight: '900', color: '#1f1a1c', marginBottom: 5 },
+  modalDesc: { fontSize: 13, color: '#837375', marginBottom: 20 },
+  
+  conflictCard: { backgroundColor: '#FFF5F5', padding: 15, borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: '#FFCDD2' },
+  conflictCourse: { fontSize: 15, fontWeight: 'bold', color: '#B71C1C' },
+  conflictSubtitle: { fontSize: 12, color: '#E53935', marginBottom: 10 },
+  suggestBtn: { flexDirection: 'row', backgroundColor: '#4CAF50', padding: 12, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
+  removeBtn: { flexDirection: 'row', backgroundColor: '#757575', padding: 12, borderRadius: 8, justifyContent: 'center', alignItems: 'center' }
 });

@@ -336,63 +336,193 @@ def view_cart(student_id: str, db: Session = Depends(get_db)):
     result = []
     for item, course in results:
         sec_int = extract_section_int(item.section_number)
-        times = []
+        added_schedule = False
+        
         if sec_int is not None:
             for r in section_map.get((item.course_id, sec_int), []):
-                # ✅ กรองเฉพาะ row ที่ตรง type
+                # กรองเฉพาะ row ที่ตรง type (T หรือ L)
                 row_type = get_section_type_from_room(r.room or "")
                 if row_type != (item.section_type or "T"):
                     continue
-                if r.start_time and r.end_time:
-                    time_str = f"{r.day_of_week} {r.start_time.strftime('%H:%M')}-{r.end_time.strftime('%H:%M')}"
-                    if time_str not in times:
-                        times.append(time_str)
+                
+                # ✅ แยกฟิลด์ วัน เวลา และห้อง เพื่อให้แอปเอาไปคำนวณและวาดตารางได้
+                result.append({
+                    "course_name": course.course_name,
+                    "course_code": item.course_id,
+                    "credits": course.credits,
+                    "section_number": item.section_number,
+                    "section_type": item.section_type or "T",
+                    "day_of_week": r.day_of_week, 
+                    "start_time": str(r.start_time) if r.start_time else None,
+                    "end_time": str(r.end_time) if r.end_time else None,
+                    "room": r.room
+                })
+                added_schedule = True
 
-        result.append({
-            "course_name": course.course_name,
-            "course_code": item.course_id,
-            "credits": course.credits,
-            "section_number": item.section_number,
-            "section_type": item.section_type or "T",  # ✅ ส่ง T/L กลับด้วย
-            "time_info": " | ".join(times),
-        })
+        # ถ้าวิชานั้นไม่มีข้อมูลเวลาเรียนในฐานข้อมูลเลย ให้แสดงเป็นค่าว่างแต่ยังต้องส่งไปแสดงในตะกร้า
+        if not added_schedule:
+            result.append({
+                "course_name": course.course_name,
+                "course_code": item.course_id,
+                "credits": course.credits,
+                "section_number": item.section_number,
+                "section_type": item.section_type or "T",
+                "day_of_week": None,
+                "start_time": None,
+                "end_time": None,
+                "room": None
+            })
+
     return result
 
 
 # =============================================================
-# 5. ยืนยันการลงทะเบียน + เพิ่ม enrolled_seats
+# 5. ระบบลงทะเบียนยกภาค (Batch Registration & Conflict Check)
 # =============================================================
+@app.get("/courses/suggested/{student_id}")
+def get_suggested_courses(student_id: str, db: Session = Depends(get_db)):
+    student = db.query(Student).filter(Student.student_id == student_id).first()
+    if not student: raise HTTPException(status_code=404, detail="ไม่พบนักศึกษา")
 
-@app.post("/enroll/confirm/{student_id}")
-def confirm_enrollment(student_id: str, db: Session = Depends(get_db)):
-    cart_items = db.query(EnrollmentCart).filter(EnrollmentCart.student_id == student_id).all()
-    if not cart_items:
-        raise HTTPException(status_code=400, detail="ตะกร้าว่างเปล่า")
+    try:
+        adm_year = int(student_id[:2])
+        current_year = 68  #ปีการศึกษา
+        year_of_study = current_year - adm_year + 1
+    except:
+        year_of_study = 1
 
-    for item in cart_items:
-        # ตรวจสอบว่าเคยลงวิชานี้และ section_type นี้หรือยัง
-        existing = db.query(Enrollment).filter(
-            Enrollment.student_id == student_id,
-            Enrollment.course_id == item.course_id,
-            Enrollment.section_type == item.section_type  # 📌 เช็คแยก T กับ L
-        ).first()
-        
-        if existing:
+    prefix = ""
+    major = student.major or ""
+    if "วิศวกรรมคอมพิวเตอร์" in major: prefix = "C"
+    elif "โลจิสติกส์" in major: prefix = "L"
+    elif "เทคโนโลยีสารสนเทศ" in major: prefix = "I"
+
+    curr_courses = db.query(CurriculumCourse, Course).join(
+        Course, CurriculumCourse.course_id == Course.course_id
+    ).filter(CurriculumCourse.suggested_year == year_of_study).all()
+
+    results = []
+    for cc, crs in curr_courses:
+        if prefix and not crs.course_id.startswith(prefix):
             continue
+        
+        secs = db.query(ClassSection).filter(ClassSection.course_id == crs.course_id).all()
+        sec_dict = {}
+        for s in secs:
+            sec_num = str(s.section_number)
+            if sec_num not in sec_dict:
+                sec_dict[sec_num] = []
+            
+            sec_type = get_section_type_from_room(s.room or "")
+            sec_dict[sec_num].append({
+                "section_type": sec_type,
+                "day_of_week": s.day_of_week,
+                "start_time": str(s.start_time)[:5] if s.start_time else None,
+                "end_time": str(s.end_time)[:5] if s.end_time else None,
+                "room": s.room
+            })
+        
+        if sec_dict:
+            results.append({
+                "course_code": crs.course_id,
+                "course_name": crs.course_name,
+                "credits": crs.credits,
+                "sections": sec_dict
+            })
+    return results
 
-        new_enroll = Enrollment(
-            student_id=student_id,
-            course_id=item.course_id,
-            section_number=item.section_number,
-            section_type=item.section_type  # 📌 บันทึก Type ลงฐานข้อมูลด้วย
-        )
-        db.add(new_enroll)
+# ✅ อัปเดต Model ให้รับแยก T และ L ได้
+class BatchItem(BaseModel):
+    course_code: str
+    section_number: str
+    section_type: str  # ส่ง T หรือ L แยกกันมาเลย
 
-    for item in cart_items:
-        db.delete(item)
+class BatchCartRequest(BaseModel):
+    student_id: str
+    items: List[BatchItem]
 
+@app.post("/cart/batch_add_with_check")
+def batch_add_cart(req: BatchCartRequest, db: Session = Depends(get_db)):
+    cart_items = db.query(EnrollmentCart).filter(EnrollmentCart.student_id == req.student_id).all()
+    
+    def get_time_slots(course_code, sec_num, sec_type):
+        slots = db.query(ClassSection).filter(
+            ClassSection.course_id == course_code, 
+            cast(ClassSection.section_number, String) == str(sec_num)
+        ).all()
+        return [s for s in slots if get_section_type_from_room(s.room or "") == sec_type]
+
+    current_schedule = []
+    for ci in cart_items:
+        current_schedule.extend(get_time_slots(ci.course_id, ci.section_number, ci.section_type or "T"))
+        
+    conflicts = []
+    to_add = []
+    
+    for req_item in req.items:
+        req_slots = get_time_slots(req_item.course_code, req_item.section_number, req_item.section_type)
+        is_conflict = False
+        
+        for rs in req_slots:
+            if not rs.start_time or not rs.end_time: continue
+            for cs in current_schedule + to_add:
+                if not cs.start_time or not cs.end_time: continue
+                if rs.day_of_week == cs.day_of_week:
+                    if max(rs.start_time, cs.start_time) < min(rs.end_time, cs.end_time):
+                        is_conflict = True
+                        break
+            if is_conflict: break
+            
+        if is_conflict:
+            # หา Sec สำรองเฉพาะ Type เดียวกัน (T หา T สำรอง, L หา L สำรอง)
+            all_secs = db.query(ClassSection).filter(ClassSection.course_id == req_item.course_code).all()
+            valid_secs = [s for s in all_secs if get_section_type_from_room(s.room or "") == req_item.section_type]
+            sec_nums = list(set([str(s.section_number) for s in valid_secs]))
+            
+            alt_sec = None
+            for sn in sec_nums:
+                if sn == req_item.section_number: continue
+                sn_slots = get_time_slots(req_item.course_code, sn, req_item.section_type)
+                sn_conflict = False
+                for sns in sn_slots:
+                    if not sns.start_time or not sns.end_time: continue
+                    for cs in current_schedule + to_add:
+                        if not cs.start_time or not cs.end_time: continue
+                        if sns.day_of_week == cs.day_of_week:
+                            if max(sns.start_time, cs.start_time) < min(sns.end_time, cs.end_time):
+                                sn_conflict = True
+                                break
+                    if sn_conflict: break
+                if not sn_conflict:
+                    alt_sec = sn
+                    break 
+                    
+            conflicts.append({
+                "course_code": req_item.course_code,
+                "section_type": req_item.section_type,
+                "requested_section": req_item.section_number,
+                "suggested_section": alt_sec
+            })
+        else:
+            to_add.extend(req_slots)
+
+    if conflicts:
+        return {"status": "conflict", "conflicts": conflicts}
+        
+    for req_item in req.items:
+        exists = db.query(EnrollmentCart).filter_by(
+            student_id=req.student_id, course_id=req_item.course_code, section_type=req_item.section_type
+        ).first()
+        if not exists:
+            new_cart = EnrollmentCart(
+                student_id=req.student_id,
+                course_id=req_item.course_code,
+                section_number=req_item.section_number,
+                section_type=req_item.section_type
+            )
+            db.add(new_cart)
     db.commit()
-    return {"message": "ยืนยันการลงทะเบียนสำเร็จ"}
+    return {"status": "success"}
 
 # =============================================================
 # 6. ตารางเรียน & ลบวิชา
@@ -450,18 +580,27 @@ def remove_cart_item_post(request: RemoveCartRequest, db: Session = Depends(get_
     return {"message": "ลบออกจากตะกร้าสำเร็จ"}
 
 
+from typing import Optional # เช็กด้วยว่าข้างบนสุดของไฟล์ import หรือยัง
+
 @app.delete("/cart/remove/{student_id}/{course_code}")
-def remove_cart_item_delete(student_id: str, course_code: str, db: Session = Depends(get_db)):
-    items = db.query(EnrollmentCart).filter(
+def remove_from_cart(student_id: str, course_code: str, section_type: Optional[str] = None, db: Session = Depends(get_db)):
+    # 1. ค้นหาวิชาและรหัสนักศึกษา
+    query = db.query(EnrollmentCart).filter(
         EnrollmentCart.student_id == student_id,
-        EnrollmentCart.course_id == course_code,
-    ).all()
-    if not items:
-        raise HTTPException(status_code=404, detail="ไม่พบวิชานี้ในตะกร้า")
-    for item in items:
-        db.delete(item)
+        EnrollmentCart.course_id == course_code
+    )
+    
+    # 2. ✅ ถ้ามีการส่ง section_type (T หรือ L) มา ให้ลบเฉพาะตัวนั้น
+    if section_type:
+        query = query.filter(EnrollmentCart.section_type == section_type)
+        
+    deleted_count = query.delete()
     db.commit()
-    return {"message": "ลบออกจากตะกร้าสำเร็จ"}
+    
+    if deleted_count == 0:
+        raise HTTPException(status_code=404, detail="ไม่พบวิชานี้ในตะกร้า")
+        
+    return {"message": "ลบวิชาออกจากตะกร้าสำเร็จ"}
 
 
 @app.get("/sections/{course_code}")

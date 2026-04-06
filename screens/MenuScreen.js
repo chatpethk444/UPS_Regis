@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 export default function MenuScreen({ student, setView, onBatch, onLogout }) {
   // คำนวณชั้นปีคร่าวๆ
-  const year = student?.year ? (2569 - parseInt(student.year)) : 3;
+const year = student?.student_id ? (68 - parseInt(student.student_id.substring(0, 2)) + 1) : 1;
   console.log(student.avatar_url)
   return (
     <LinearGradient colors={['#FFDAE4', '#FFF8F8']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0.3 }} style={styles.container}>

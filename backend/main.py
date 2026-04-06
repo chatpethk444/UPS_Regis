@@ -124,6 +124,8 @@ def format_plan(plan: list) -> list:
             "section_number": str(s.section_number),
             "section_type": sec_type,
             "instructor": s.instructor_id,
+            "enrolled_seats": s.enrolled_seats,
+            "max_seats": s.max_seats,
             "class_times": [{"day": raw_day, "start": start_float, "end": end_float}],
             "_sort_day": DAY_ORDER.get(raw_day, 9),
             "_sort_time": start_float,
@@ -155,7 +157,9 @@ def login(request: dict, db: Session = Depends(get_db)):
             "major": student.major,
             "year": student.curriculum_year,
             "faculty": student.faculty,
-            "avatar_url": student.avatar_url
+            "avatar_url": student.avatar_url,
+            "current_semester": getattr(student, 'current_semester', 1),
+            "current_semester": 2
         }
     raise HTTPException(status_code=401, detail="ไม่พบรหัสนักศึกษานี้ในระบบ")
 
@@ -204,15 +208,73 @@ def get_available_courses(student_id: str, db: Session = Depends(get_db)):
 # 3. AI Scheduler
 # =============================================================
 
+# 🌟 ฟังก์ชันเสริม: ใช้เพื่อหาว่าวิชาไหนชนกันแบบละเอียด (บอกวัน/เวลา)
+def find_conflict_details(plan_secs, current_secs):
+    all_secs = plan_secs + current_secs
+    for i in range(len(all_secs)):
+        for j in range(i + 1, len(all_secs)):
+            s1 = all_secs[i]
+            s2 = all_secs[j]
+            
+            # ถ้าเป็นวิชาเดียวกัน Section เดียวกัน ให้ข้าม (ไม่ถือว่าชน)
+            if s1.course_id == s2.course_id and getattr(s1, 'section_number', '') == getattr(s2, 'section_number', ''):
+                continue
+                
+            # ถ้าเรียนวันเดียวกัน
+            if s1.day_of_week and s2.day_of_week and s1.day_of_week == s2.day_of_week:
+                if s1.start_time and s1.end_time and s2.start_time and s2.end_time:
+                    
+                    # แปลงเวลาเป็นนาทีเพื่อเช็คการทับซ้อน
+                    def get_mins(t):
+                        if hasattr(t, 'hour'): # ถ้าเป็น object datetime.time
+                            return t.hour * 60 + t.minute
+                        # ถ้าเป็น string เช่น "09:00"
+                        h, m = map(int, str(t).split(':')[:2])
+                        return h * 60 + m
+                        
+                    start1, end1 = get_mins(s1.start_time), get_mins(s1.end_time)
+                    start2, end2 = get_mins(s2.start_time), get_mins(s2.end_time)
+                    
+                    # สูตรเช็คเวลาทับซ้อน
+                    if start1 < end2 and start2 < end1:
+                        fmt_t1 = f"{str(s1.start_time)[:5]}-{str(s1.end_time)[:5]}"
+                        fmt_t2 = f"{str(s2.start_time)[:5]}-{str(s2.end_time)[:5]}"
+                        
+                        type1 = "(ในตาราง)" if s1 in current_secs else "(วิชาเป้าหมาย)"
+                        type2 = "(ในตาราง)" if s2 in current_secs else "(วิชาเป้าหมาย)"
+                        
+                        return f"วิชา {s1.course_id} {type1} ชนกับ {s2.course_id} {type2}\nวัน{s1.day_of_week} เวลา {fmt_t1} ทับกับ {fmt_t2}"
+    return None
+
+
 @app.post("/ai-suggest")
 def ai_suggest(data: dict, db: Session = Depends(get_db)):
+    student_id = data.get("student_id")
     course_codes = list(set(data.get("course_codes", [])))
+
+    if not student_id:
+        raise HTTPException(status_code=400, detail="ต้องระบุ student_id")
+
+    MAX_AI_COURSES = 10 # สมมติค่า ถ้ามีประกาศไว้ข้างนอกแล้วลบบรรทัดนี้ได้เลย
+    MAX_AI_PLANS = 5
 
     if len(course_codes) > MAX_AI_COURSES:
         raise HTTPException(
             status_code=400,
             detail=f"เลือกได้สูงสุด {MAX_AI_COURSES} วิชาต่อครั้ง"
         )
+
+    # 🌟 ดึงข้อมูลตารางเรียนปัจจุบันมาเช็คชน
+    current_enrollments = db.query(Enrollment).filter(Enrollment.student_id == student_id).all()
+    current_slots = []
+    for en in current_enrollments:
+        secs = db.query(ClassSection).filter(
+            ClassSection.course_id == en.course_id,
+            ClassSection.section_number == en.section_number
+        ).all()
+        for s in secs:
+            if get_section_type_from_room(s.room or "") == (en.section_type or "T"):
+                current_slots.append(s)
 
     all_course_options = []
 
@@ -242,17 +304,28 @@ def ai_suggest(data: dict, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="ไม่พบกลุ่มเรียนสำหรับวิชาที่เลือก")
 
     valid_plans = []
+    conflict_reason = "ไม่สามารถจัดตารางได้ เนื่องจากเวลาเรียนชนกัน"
+    
     for plan_combinations in product(*all_course_options):
         flat_plan = [sec for item in plan_combinations for sec in item]
-        if not is_conflict(flat_plan):
+        
+        # 🌟 เช็คชนกันเอง และ เช็คชนกับตารางเรียนปัจจุบัน
+        if not is_conflict(flat_plan + current_slots):
             valid_plans.append(format_plan(flat_plan))
+        elif not valid_plans:
+            # 🌟 ถ้ายังไม่มีแผนไหนผ่านเลย ลองเก็บรายละเอียดการชนของแพลนนี้ไว้เผื่อแจ้ง Error
+            detail = find_conflict_details(flat_plan, current_slots)
+            if detail:
+                conflict_reason = detail
+                
         if len(valid_plans) >= MAX_AI_PLANS:
             break
 
+    # 🌟 แจ้งเตือนข้อความ Error พร้อมรายละเอียดที่ไปสืบมา
     if not valid_plans:
         raise HTTPException(
             status_code=400,
-            detail="ไม่สามารถจัดตารางที่ไม่ชนกันได้เลย ลองลดจำนวนวิชาลงนะครับ"
+            detail=conflict_reason
         )
 
     return valid_plans
@@ -386,7 +459,7 @@ def get_suggested_courses(student_id: str, db: Session = Depends(get_db)):
 
     try:
         adm_year = int(student_id[:2])
-        current_year = 68  #ปีการศึกษา
+        current_year = 66  
         year_of_study = current_year - adm_year + 1
     except:
         year_of_study = 1
@@ -397,9 +470,13 @@ def get_suggested_courses(student_id: str, db: Session = Depends(get_db)):
     elif "โลจิสติกส์" in major: prefix = "L"
     elif "เทคโนโลยีสารสนเทศ" in major: prefix = "I"
 
+    # 🌟 เพิ่มการกรอง suggested_semester == 2 ตรงนี้
     curr_courses = db.query(CurriculumCourse, Course).join(
         Course, CurriculumCourse.course_id == Course.course_id
-    ).filter(CurriculumCourse.suggested_year == year_of_study).all()
+    ).filter(
+        CurriculumCourse.suggested_year == year_of_study,
+        CurriculumCourse.suggested_semester == 2
+    ).all()
 
     results = []
     for cc, crs in curr_courses:
@@ -419,7 +496,10 @@ def get_suggested_courses(student_id: str, db: Session = Depends(get_db)):
                 "day_of_week": s.day_of_week,
                 "start_time": str(s.start_time)[:5] if s.start_time else None,
                 "end_time": str(s.end_time)[:5] if s.end_time else None,
-                "room": s.room
+                "room": s.room,
+                "max_seats": getattr(s, 'max_seats', 30), 
+                "enrolled_seats": getattr(s, 'enrolled_seats', 0)
+                
             })
         
         if sec_dict:
@@ -578,6 +658,8 @@ def remove_cart_item_post(request: RemoveCartRequest, db: Session = Depends(get_
         db.delete(item)
     db.commit()
     return {"message": "ลบออกจากตะกร้าสำเร็จ"}
+
+
 
 
 from typing import Optional # เช็กด้วยว่าข้างบนสุดของไฟล์ import หรือยัง
@@ -795,8 +877,8 @@ def get_my_group(student_id: str, db: Session = Depends(get_db)):
                 "section_type": ec.section_type or "-",
                 "day": cs.day_of_week if cs else "-",
                 "time_info": f"{cs.start_time} - {cs.end_time}" if cs and cs.start_time else "",
-                "enrolled": cs.enrolled_seats if cs else 0,
-                "capacity": cs.max_seats if cs else 0
+                "enrolled_seats": cs.enrolled_seats if cs else 0,
+                "max_seats": cs.max_seats if cs else 0
             }
         else:
             # ถ้าเป็นวิชาเดียวกันแต่เรียนหลายวัน ให้เอาวันมาต่อกัน
@@ -810,11 +892,21 @@ def get_my_group(student_id: str, db: Session = Depends(get_db)):
         "members": [{
             "student_id": m.student_id,
             "name": s.name,
-            "avatar_url": s.avatar_url,  # <--- ต้องมีบรรทัดนี้ส่งไปด้วย!
+            "avatar_url": s.avatar_url,
             "status": m.status,
-            "is_ready": m.is_ready 
+            "is_ready": m.is_ready,
+            "has_seen_registered_alert": m.has_seen_registered_alert
         } for m, s in members]
     }
+
+@app.post("/group/mark-seen-registered/{student_id}")
+def mark_seen_registered(student_id: str, db: Session = Depends(get_db)):
+    member = db.query(GroupMember).filter(GroupMember.student_id == student_id).first()
+    if not member:
+        raise HTTPException(status_code=404, detail="ไม่พบสมาชิก")
+    member.has_seen_registered_alert = True
+    db.commit()
+    return {"message": "บันทึกการรับทราบการลงทะเบียนสำเร็จ"}
 
 # 2. API สำหรับสมาชิกกด "ยืนยันความพร้อม"
 @app.post("/group/ready/{student_id}")
@@ -843,29 +935,23 @@ def register_group_all(leader_id: str, db: Session = Depends(get_db)):
     if not group:
         raise HTTPException(status_code=404, detail="ไม่พบกลุ่ม")
 
-    # 1. ดึงสมาชิกที่ได้รับการอนุมัติทั้งหมด (ใช้ .all() เพื่อให้เป็น List ที่วนลูปได้)
     approved_members = db.query(GroupMember).filter(
         GroupMember.group_id == group.group_id, 
         GroupMember.status == "APPROVED"
     ).all()
 
-    # 2. เช็คความพร้อมของสมาชิก (ยกเว้นหัวหน้า)
     for member in approved_members:
-        if member.student_id == leader_id:
-            continue 
-            
+        if member.student_id == leader_id: continue 
         if not member.is_ready:
-            # ส่งรหัสนักศึกษาคนที่ไม่พร้อมกลับไปบอกหัวหน้า
             raise HTTPException(status_code=400, detail=f"สมาชิกยังไม่พร้อม: {member.student_id}")
 
-    # 3. ถ้าทุกคนพร้อมแล้ว เริ่มกระบวนการลงทะเบียน (Copy ตะกร้าหัวหน้าไปลงทะเบียนให้ทุกคน)
     leader_cart = db.query(EnrollmentCart).filter(EnrollmentCart.student_id == leader_id).all()
     if not leader_cart:
         raise HTTPException(status_code=400, detail="ตะกร้าของหัวหน้ากลุ่มว่างเปล่า")
 
+    # กระบวนการลงทะเบียน
     for member in approved_members:
         for item in leader_cart:
-            # เช็คว่าเคยลงไปหรือยัง
             exist = db.query(Enrollment).filter(
                 Enrollment.student_id == member.student_id,
                 Enrollment.course_id == item.course_id,
@@ -873,6 +959,18 @@ def register_group_all(leader_id: str, db: Session = Depends(get_db)):
             ).first()
             
             if not exist:
+                # อัปเดตที่นั่ง
+                sections = db.query(ClassSection).filter(
+                    ClassSection.course_id == item.course_id,
+                    ClassSection.section_number == item.section_number
+                ).all()
+                for s in sections:
+                    if get_section_type_from_room(s.room or "") == item.section_type:
+                        if s.max_seats and s.enrolled_seats >= s.max_seats:
+                            raise HTTPException(status_code=400, detail=f"วิชา {item.course_id} ที่นั่งเต็มแล้ว")
+                        s.enrolled_seats += 1
+                        break
+
                 new_enroll = Enrollment(
                     student_id=member.student_id,
                     course_id=item.course_id,
@@ -881,9 +979,10 @@ def register_group_all(leader_id: str, db: Session = Depends(get_db)):
                 )
                 db.add(new_enroll)
         
-        # ลบตะกร้าของสมาชิกคนนั้นๆ ออกด้วยหลังจากลงทะเบียนเสร็จ
         db.query(EnrollmentCart).filter(EnrollmentCart.student_id == member.student_id).delete()
 
+    group.is_registered = True
+    group.last_action = "REGISTERED"
     db.commit()
     return {"message": "ลงทะเบียนให้สมาชิกทุกคนในกลุ่มสำเร็จ!"}
 
@@ -911,10 +1010,41 @@ def sync_group_cart(leader_id: str, db: Session = Depends(get_db)):
     if not group: raise HTTPException(status_code=403, detail="ไม่มีสิทธิ์ Sync")
     
     leader_cart = db.query(EnrollmentCart).filter(EnrollmentCart.student_id == leader_id).all()
+    if not leader_cart:
+        raise HTTPException(status_code=400, detail="ตะกร้าของหัวหน้ากลุ่มว่างเปล่า กรุณาเลือกวิชาก่อน Sync")
+
     approved_members = db.query(GroupMember).filter(GroupMember.group_id == group.group_id, GroupMember.status == "APPROVED").all()
     
+    # ดึงข้อมูลเวลาเรียนของตะกร้าหัวหน้ามาไว้เช็คชน
+    def get_slots(c_id, s_num, s_type):
+        return [s for s in db.query(ClassSection).filter(ClassSection.course_id==c_id, cast(ClassSection.section_number, String)==str(s_num)).all() 
+                if get_section_type_from_room(s.room or "") == s_type]
+    
+    leader_slots = []
+    for item in leader_cart:
+        leader_slots.extend(get_slots(item.course_id, item.section_number, item.section_type or "T"))
+
     for member in approved_members:
         if member.student_id == leader_id: continue 
+        
+        # 1. เช็ควิชาซ้ำกับตารางเรียนจริงของสมาชิก
+        member_enrolls = db.query(Enrollment).filter(Enrollment.student_id == member.student_id).all()
+        for le in leader_cart:
+            if any(me.course_id == le.course_id and me.section_type == le.section_type for me in member_enrolls):
+                raise HTTPException(status_code=400, detail=f"สมาชิก {member.student_id} มีวิชา {le.course_id} ในตารางเรียนแล้ว")
+
+        # 2. เช็คเวลาชนกับตารางเรียนจริงของสมาชิก
+        for ls in leader_slots:
+            if not ls.start_time or not ls.end_time: continue
+            for me in member_enrolls:
+                me_secs = db.query(ClassSection).filter(ClassSection.course_id==me.course_id, cast(ClassSection.section_number, String)==str(me.section_number)).all()
+                for mes in me_secs:
+                    if get_section_type_from_room(mes.room or "") != (me.section_type or "T"): continue
+                    if ls.day_of_week == mes.day_of_week:
+                        if max(ls.start_time, mes.start_time) < min(ls.end_time, mes.end_time):
+                            raise HTTPException(status_code=400, detail=f"วิชา {ls.course_id} ของหัวหน้า ชนกับวิชา {me.course_id} ในตารางเรียนของสมาชิก {member.student_id}")
+
+        # ถ้าผ่านการเช็ค ให้เคลียร์ตะกร้าเก่าและ Sync ใหม่
         db.query(EnrollmentCart).filter(EnrollmentCart.student_id == member.student_id).delete()
         for item in leader_cart:
             new_item = EnrollmentCart(
@@ -923,7 +1053,9 @@ def sync_group_cart(leader_id: str, db: Session = Depends(get_db)):
             )
             db.add(new_item)
             
-    group.last_synced_at = datetime.datetime.utcnow() # 🌟 อัปเดตเวลาตอนกด Sync
+    group.last_synced_at = datetime.datetime.utcnow() 
+    group.last_action = "SYNC"
+    group.is_registered = False # 🌟 Reset registration status on new sync
     db.commit()
     return {"message": "Sync ตะกร้าให้สมาชิกสำเร็จ"}
 
@@ -943,8 +1075,115 @@ def delete_group(leader_id: str, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "ยุบกลุ่มสำเร็จ"}
 
+@app.post("/cart/confirm/{student_id}")
+def confirm_enrollment(student_id: str, db: Session = Depends(get_db)):
+    # 1. ดึงวิชาทั้งหมดในตะกร้าของนักศึกษาคนนี้
+    cart_items = db.query(EnrollmentCart).filter(EnrollmentCart.student_id == student_id).all()
+    
+    if not cart_items:
+        raise HTTPException(status_code=400, detail="ตะกร้าว่างเปล่า ไม่มีวิชาให้ยืนยันการลงทะเบียน")
 
+    # 2. ย้ายข้อมูลจากตะกร้าไปที่ตาราง Enrollment (ตารางเรียนจริง)
+    for item in cart_items:
+        # เช็คก่อนว่าเคยลงทะเบียนวิชา+Type นี้ไปแล้วหรือยัง (กันลงซ้ำ)
+        existing = db.query(Enrollment).filter(
+            Enrollment.student_id == student_id,
+            Enrollment.course_id == item.course_id,
+            Enrollment.section_type == item.section_type
+        ).first()
+        
+        if not existing:
+            # 🌟 แก้ไขตรงนี้: ดึง ClassSection มาทั้งหมดก่อน (ตัด .filter(section_type) ออก)
+            sections = db.query(ClassSection).filter(
+                ClassSection.course_id == item.course_id,
+                ClassSection.section_number == item.section_number
+            ).all()
 
+            target_section = None
+            
+            # 🌟 ใช้ Python วนลูปหา Section ที่เป็น ทฤษฎี หรือ ปฏิบัติ ตามที่อยู่ในตะกร้า
+            for s in sections:
+                # เรียกใช้ฟังก์ชันแปลงชื่อห้องเป็น Type เหมือนที่คุณใช้ในจุดอื่นๆ
+                s_type = get_section_type_from_room(s.room or "")
+                if s_type == item.section_type:
+                    target_section = s
+                    break
+            
+            # ถ้าหาเป๊ะๆ ไม่เจอ ให้ดึงตัวแรกมาจัดการแทน (Fallback)
+            if not target_section and sections:
+                target_section = sections[0]
+
+            if target_section:
+                # เช็คว่าที่นั่งเต็มไหม
+                cap = target_section.max_seats or 0
+                enr = target_section.enrolled_seats or 0
+                
+                if cap > 0 and enr >= cap:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"ไม่สามารถลงทะเบียนได้: วิชา {item.course_id} กลุ่ม {item.section_number} ที่นั่งเต็มแล้ว"
+                    )
+                
+                # เพิ่มยอดคนลงทะเบียน (+1)
+                target_section.enrolled_seats = enr + 1
+
+            # บันทึกวิชาลงตาราง Enrollment (ตารางเรียนหลัก)
+            new_enrollment = Enrollment(
+                student_id=student_id,
+                course_id=item.course_id,
+                section_number=item.section_number,
+                section_type=item.section_type
+            )
+            db.add(new_enrollment)
+            
+    # 3. ลบวิชาออกจากตะกร้า หลังจากย้ายไปตารางเรียนแล้ว
+    db.query(EnrollmentCart).filter(EnrollmentCart.student_id == student_id).delete()
+    
+    # 4. ยืนยันการบันทึกข้อมูลทั้งหมดลงฐานข้อมูล
+    db.commit()
+    
+    return {"message": "ลงทะเบียนสำเร็จ"}
+
+# =============================================================
+# API สำหรับถอนรายวิชา
+# =============================================================
+@app.post("/enrollment/withdraw")
+def withdraw_course(data: dict, db: Session = Depends(get_db)):
+    student_id = data.get("student_id")
+    course_code = data.get("course_code")
+    section_type = data.get("section_type")
+
+    # 1. ลบวิชาออกจากตารางเรียน (ตาราง Enrollment น่าจะมี section_type ตามที่คุณเคยลงไป)
+    # ถ้าตาราง Enrollment ของคุณก็ไม่มี section_type ให้ลบบรรทัด Enrollment.section_type ทิ้งไปเลยครับ
+    enrollment = db.query(Enrollment).filter(
+        Enrollment.student_id == student_id,
+        Enrollment.course_id == course_code,
+        Enrollment.section_type == section_type
+    ).first()
+
+    if not enrollment:
+        raise HTTPException(status_code=404, detail="ไม่พบข้อมูลการลงทะเบียนวิชานี้")
+
+    # เก็บหมายเลขกลุ่มเรียนไว้ก่อนลบ เพื่อเอาไปคืนค่าที่นั่งให้ถูกกลุ่ม
+    sec_num = enrollment.section_number 
+
+    # ลบออกจากตารางเรียน
+    db.delete(enrollment)
+
+    # 2. คืนค่าที่นั่ง (ลบ enrolled_seats - 1)
+    # 🌟 แก้ไขตรงนี้: เปลี่ยนจากการหาด้วย section_type เป็นหาด้วย section_number แทน
+    section_to_update = db.query(ClassSection).filter(
+        ClassSection.course_id == course_code,
+        ClassSection.section_number == sec_num
+    ).all()
+
+    # บางวิชามี 2 แถว (ทฤษฎี/ปฏิบัติ) ใน 1 กลุ่มเรียน เลยต้องวนลูปเผื่อไว้
+    for sec in section_to_update:
+        if sec.enrolled_seats > 0:
+            sec.enrolled_seats -= 1
+        
+    db.commit()
+    return {"status": "success", "message": "ถอนรายวิชาสำเร็จ"}
 
 
 Base.metadata.create_all(bind=engine)

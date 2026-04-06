@@ -19,6 +19,7 @@ import {
   addToCartAPI,
   getCartAPI,
   getZOptionsAPI,
+  getScheduleAPI
 } from "../api";
 
 // ✅ แยก api.js ให้รับ section_type ด้วย
@@ -53,17 +54,23 @@ export default function ManualScreen({ student, setView }) {
   const [sections, setSections] = useState([]);
   const [cart, setCart] = useState([]);
   const [zOptions, setZOptions] = useState(null);
+  const [schedule, setSchedule] = useState([]);
 
   useEffect(() => {
-    fetchCartData();
+    fetchUserData();
   }, []);
 
-  const fetchCartData = async () => {
+  // ✅ ดึงข้อมูลตะกร้าและตารางเรียนมาพร้อมกัน
+  const fetchUserData = async () => {
     try {
-      const data = await getCartAPI(student.student_id);
-      setCart(data);
+      const [cartData, scheduleData] = await Promise.all([
+        getCartAPI(student.student_id).catch(() => []),
+        getScheduleAPI(student.student_id).catch(() => [])
+      ]);
+      setCart(cartData);
+      setSchedule(scheduleData);
     } catch (err) {
-      console.error("Fetch Cart Error:", err);
+      console.error("Fetch User Data Error:", err);
     }
   };
 
@@ -86,25 +93,33 @@ export default function ManualScreen({ student, setView }) {
     try {
       const data = await getAvailableCoursesAPI(student.student_id);
       const q = searchQuery.toLowerCase();
+      
       const filtered = data.filter(
         (c) =>
-          c.course_code.toLowerCase().includes(q) ||
-          c.course_name.toLowerCase().includes(q),
+          // 1. เช็กว่าคำค้นหาตรงกับรหัสหรือชื่อวิชา
+          (c.course_code.toLowerCase().includes(q) ||
+           c.course_name.toLowerCase().includes(q)) 
+          && 
+          // ✅ 2. เปลี่ยนมาใช้ c.suggested_semester ให้ตรงกับ API
+          (c.suggested_semester == student.current_semester) 
       );
+      
       setCourses(filtered);
       setIsSearched(true);
-      // ✅ เคลียร์วิชาที่กดค้างไว้เวลาค้นหาใหม่
       setSelectedCourse(null); 
       setSections([]);
       setZOptions(null);
 
       if (filtered.length === 0)
-        Alert.alert("ไม่พบวิชา", "ลองค้นหาด้วยคำอื่นครับ");
+        Alert.alert("ไม่พบวิชา", `ไม่มีวิชาที่ตรงกับการค้นหาในเทอม ${student.current_semester} ครับ`);
     } catch (err) {
       Alert.alert("Error", err.message);
     } finally {
       setLoading(false);
     }
+
+    const data = await getAvailableCoursesAPI(student.student_id);
+    console.log("ตัวอย่างข้อมูลวิชาที่ Backend ส่งมา:", data[0]); // ดูที่ Terminal
   };
 
   // ✅ แก้ไข: เพิ่มระบบ Toggle ถ้ากดวิชาเดิมซ้ำให้พับเก็บ
@@ -141,7 +156,14 @@ export default function ManualScreen({ student, setView }) {
   // ✅ แก้ไข: รับ parameter targetCourse เข้ามาด้วย เพื่อรองรับวิชา Z ที่รหัสวิชาลูกจะไม่เหมือนวิชาแม่
   // ✅ 1. เพิ่ม parameter computedType เข้ามา
   const handleAddSection = async (targetCourse, section, computedType) => {
-    const sectionType = computedType || "T"; // ใช้ Type ที่คำนวณจาก UI
+    const sectionType = computedType || "T"; 
+
+    if (targetCourse.required_semester && student.current_semester < targetCourse.required_semester) {
+      Alert.alert(
+        "⚠️ คำเตือน", 
+        `วิชานี้แนะนำสำหรับนักศึกษาเทอม ${targetCourse.required_semester} (คุณอยู่เทอม ${student.current_semester})`
+      );
+    }
 
     if (section.enrolled_seats >= section.max_seats) {
       return Alert.alert(
@@ -150,27 +172,48 @@ export default function ManualScreen({ student, setView }) {
       );
     }
 
-    const existingSameType = cart.find(
-      (i) =>
-        i.course_code === targetCourse.course_code &&
-        i.section_type === sectionType,
+    // 🌟 รวมวิชาในตะกร้าและในตารางเรียนเข้าด้วยกันเพื่อเช็กทีเดียว
+    const allRegistered = [...cart, ...schedule];
+
+    // ✅ เงื่อนไขที่ 1: เช็กว่ามีวิชานี้อยู่แล้วหรือไม่ (แยกทฤษฎี/ปฏิบัติ)
+    const existingSameType = allRegistered.find(
+      (i) => i.course_code === targetCourse.course_code && i.section_type === sectionType
     );
+    
     if (existingSameType) {
       const typeLabel = sectionType === "T" ? "ทฤษฎี (T)" : "ปฏิบัติ (L)";
+      // หาว่าวิชานี้อยู่ตะกร้าหรือตารางเรียนเพื่อแจ้งผู้ใช้ให้ถูกที่
+      const location = cart.some(c => c.course_code === existingSameType.course_code) 
+        ? "ตะกร้า" 
+        : "ตารางเรียน";
+      
       return Alert.alert(
-        `❌ มี ${typeLabel} แล้ว`,
-        `วิชานี้มี ${typeLabel} Sec ${existingSameType.section_number} อยู่ในตะกร้าแล้ว\nลบออกก่อนถ้าต้องการเปลี่ยน`,
+        `❌ ไม่สามารถเพิ่มได้`,
+        `คุณมีวิชา ${targetCourse.course_code} Sec ${existingSameType.section_number} ${typeLabel}\nอยู่ใน "${location}" แล้วครับ`
       );
     }
 
-    const conflict = cart.find((i) => isTimeOverlapping(i, section));
+    // ✅ เงื่อนไขที่ 2: เช็กว่าเวลาเรียนชนกันหรือไม่
+    const conflict = allRegistered.find((i) => isTimeOverlapping(i, section));
+    
     if (conflict) {
+      const location = cart.some(c => c.course_code === conflict.course_code) 
+        ? "ตะกร้า" 
+        : "ตารางเรียน";
+
+      // 🌟 แก้ไขตรงนี้: ดึงค่าประเภทให้คลุมทั้งกรณี section_type และ type
+      const conflictType = conflict.section_type || conflict.type; 
+      let typeLabel = "";
+      if (conflictType === "T") typeLabel = "(ทฤษฎี)";
+      else if (conflictType === "L") typeLabel = "(ปฏิบัติ)";
+
       return Alert.alert(
-        "⚠️ เวลาชนกัน!",
-        `ทับซ้อนกับวิชา ${conflict.course_code} (${conflict.section_type})`,
+        "⚠️ เวลาเรียนชนกัน!",
+        `Sec ที่คุณเลือก มีเวลาทับซ้อนกับวิชา:\n${conflict.course_code} Sec ${conflict.section_number} ${typeLabel}\nซึ่งอยู่ใน "${location}" ของคุณแล้ว`
       );
     }
 
+    // ถ้าผ่านด่านทั้งหมด ก็ทำการแอดลงตะกร้าได้ปกติ
     try {
       await addToCartWithType(
         student.student_id,
@@ -183,7 +226,7 @@ export default function ManualScreen({ student, setView }) {
         "✅ สำเร็จ",
         `เพิ่ม Sec ${section.section_number} ${typeLabel} ลงตะกร้าแล้ว`,
       );
-      fetchCartData();
+      fetchUserData(); // ✅ โหลดข้อมูลใหม่เพื่ออัปเดต state ทันที
     } catch (err) {
       Alert.alert("❌ ไม่สำเร็จ", err.message);
     }
@@ -268,7 +311,13 @@ export default function ManualScreen({ student, setView }) {
             >
               <MaterialIcons name="arrow-back" size={24} color="#7b5455" />
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>ค้นหาวิชาเรียน</Text>
+            <View>
+              <Text style={styles.headerTitle}>ค้นหาวิชาเรียน</Text>
+              {/* ✅ เพิ่มการแสดงผล เทอมปัจจุบัน ตรงนี้
+              <Text style={{ fontSize: 13, color: "#837375", marginTop: 2 }}>
+                เทอมปัจจุบันของคุณ: {student?.current_semester || "ไม่ระบุ"}
+              </Text> */}
+            </View>
           </View>
           <TouchableOpacity style={styles.bellButton}>
             <MaterialIcons name="filter-list" size={24} color="#514345" />

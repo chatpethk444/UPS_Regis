@@ -1,7 +1,7 @@
 // api.js — จุดเดียวสำหรับ call ทุก API
 // ✅ แก้ IP ที่นี่ที่เดียว ไม่ต้องแก้ทุกไฟล์
 
-export const BASE_URL = "http://10.230.252.135:8000";
+export const BASE_URL = "http://10.230.252.135:8001";
 // สำหรับเครื่องจริง: เปลี่ยนเป็น IP เครื่องคอม เช่น "http://192.168.1.x:8000"
 
 /**
@@ -67,7 +67,7 @@ export const removeFromCartAPI = (student_id, course_code, section_type) =>
 
 // --- Enrollment ---
 export const confirmEnrollmentAPI = (student_id) =>
-  apiFetch(`/enroll/confirm/${student_id}`, { method: "POST" });
+  apiFetch(`/cart/confirm/${student_id}`, { method: "POST" });
 
 export const getScheduleAPI = (student_id) =>
   apiFetch(`/enroll/my/${student_id}`);
@@ -117,6 +117,9 @@ export const deleteGroupAPI = (leader_id) =>
 export const toggleReadyAPI = (student_id) =>
   apiFetch(`/group/ready/${student_id}`, { method: "POST" });
 
+export const markSeenRegisteredAPI = (student_id) =>
+  apiFetch(`/group/mark-seen-registered/${student_id}`, { method: "POST" });
+
 export const registerGroupAllAPI = (leader_id) =>
   apiFetch(`/group/register-all/${leader_id}`, { method: "POST" });
 
@@ -129,3 +132,30 @@ export const batchAddWithCheckAPI = (student_id, items) =>
     method: "POST",
     body: JSON.stringify({ student_id, items }),
   });
+
+export const withdrawCourseAPI = async (studentId, courseCode, sectionType) => {
+  try {
+    const response = await fetch(`${BASE_URL}/enrollment/withdraw`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        student_id: studentId,
+        course_code: courseCode,
+        section_type: sectionType
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.message || "เกิดข้อผิดพลาดในการถอนรายวิชา");
+    }
+
+    return data;
+  } catch (error) {
+    console.error("Error withdrawing course:", error);
+    throw error;
+  }
+};

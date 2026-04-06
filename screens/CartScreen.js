@@ -12,11 +12,11 @@ import {
 } from "react-native";
 import { MaterialIcons, Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { getCartAPI, removeFromCartAPI, confirmEnrollmentAPI } from "../api";
+// 🌟 1. Import getScheduleAPI เข้ามาเพื่อดึงวิชาที่เคยลงทะเบียนแล้ว
+import { getCartAPI, removeFromCartAPI, confirmEnrollmentAPI, getScheduleAPI } from "../api";
 
 const { width } = Dimensions.get("window");
 
-// 🌟 ปรับ ONE_HOUR_WIDTH เป็น 45 เพื่อให้ตารางกว้างล้นจอและเลื่อนได้เหมือน ScheduleScreen
 const GRID_START_HOUR = 8;
 const GRID_END_HOUR = 19;
 const COLUMN_COUNT = GRID_END_HOUR - GRID_START_HOUR;
@@ -25,32 +25,15 @@ const DAY_COLUMN_WIDTH = 60;
 const TOTAL_GRID_WIDTH = ONE_HOUR_WIDTH * COLUMN_COUNT;
 
 const DAY_MAP = {
-  Mon: "จันทร์",
-  Tue: "อังคาร",
-  Wed: "พุธ",
-  Thu: "พฤหัสบดี",
-  Fri: "ศุกร์",
-  Sat: "เสาร์",
-  Sun: "อาทิตย์",
-  Monday: "จันทร์",
-  Tuesday: "อังคาร",
-  Wednesday: "พุธ",
-  Thursday: "พฤหัสบดี",
-  Friday: "ศุกร์",
-  จันทร์: "จันทร์",
-  อังคาร: "อังคาร",
-  พุธ: "พุธ",
-  พฤหัส: "พฤหัสบดี",
-  พฤหัสบดี: "พฤหัสบดี",
-  ศุกร์: "ศุกร์",
-  เสาร์: "เสาร์",
-  อาทิตย์: "อาทิตย์",
+  Mon: "จันทร์", Tue: "อังคาร", Wed: "พุธ", Thu: "พฤหัสบดี", Fri: "ศุกร์", Sat: "เสาร์", Sun: "อาทิตย์",
+  Monday: "จันทร์", Tuesday: "อังคาร", Wednesday: "พุธ", Thursday: "พฤหัสบดี", Friday: "ศุกร์",
+  จันทร์: "จันทร์", อังคาร: "อังคาร", พุธ: "พุธ", พฤหัส: "พฤหัสบดี", พฤหัสบดี: "พฤหัสบดี", ศุกร์: "ศุกร์", เสาร์: "เสาร์", อาทิตย์: "อาทิตย์",
+  จ: "จันทร์", อ: "อังคาร", พ: "พุธ", พฤ: "พฤหัสบดี", ศ: "ศุกร์", ส: "เสาร์", อา: "อาทิตย์",
 };
-
-const DAY_KEYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export default function CartScreen({ student, setView }) {
   const [items, setItems] = useState([]);
+  const [enrolledItems, setEnrolledItems] = useState([]); // 🌟 2. เพิ่ม State เก็บตารางเรียน
   const [loadingCart, setLoadingCart] = useState(false);
   const [scheduleData, setScheduleData] = useState([]);
 
@@ -61,31 +44,41 @@ export default function CartScreen({ student, setView }) {
   const fetchCart = async () => {
     setLoadingCart(true);
     try {
-      const data = await getCartAPI(student.student_id);
+      // 🌟 3. ดึงข้อมูลทั้ง 2 แหล่ง (ตะกร้า และ ตารางเรียนปัจจุบัน)
+      const [cartData, scheduleResponse] = await Promise.all([
+        getCartAPI(student.student_id).catch(() => []),
+        getScheduleAPI(student.student_id).catch(() => [])
+      ]);
+
+      const validCartData = Array.isArray(cartData) ? cartData : [];
+      const validScheduleData = Array.isArray(scheduleResponse) ? scheduleResponse : [];
+
+      setItems(validCartData);
+      setEnrolledItems(validScheduleData);
 
       const rawSchedule = [];
-      setItems(data);
+      const normalizeDayTh = (d) => {
+        if (!d) return "";
+        const dayStr = String(d).trim().toLowerCase();
+        const key = Object.keys(DAY_MAP).find(k => k.toLowerCase() === dayStr);
+        return key ? DAY_MAP[key] : dayStr;
+      };
 
-      data.forEach((item) => {
+      validCartData.forEach((item) => {
         if (item.day_of_week && item.start_time && item.end_time) {
           rawSchedule.push({
             course_code: item.course_code || item.course_id,
-            day_of_week: item.day_of_week,
-            start_time: String(item.start_time).substring(0, 5), // ตัดให้เหลือแค่ HH:MM เผื่อมีวินาทีติดมา
+            day_of_week: normalizeDayTh(item.day_of_week),
+            start_time: String(item.start_time).substring(0, 5),
             end_time: String(item.end_time).substring(0, 5),
             section_type: item.section_type || "T",
           });
         }
       });
 
-      // ยุบรวมก้อนวิชา (Logic เดียวกับ ScheduleScreen)
       const merged = rawSchedule.reduce((acc, curr) => {
-        const dayCurr = curr.day_of_week;
         const existingIdx = acc.findIndex(
-          (item) =>
-            item.course_code === curr.course_code &&
-            (item.day_of_week === dayCurr ||
-              DAY_MAP[item.day_of_week] === DAY_MAP[dayCurr]),
+          (item) => item.course_code === curr.course_code && item.day_of_week === curr.day_of_week
         );
 
         if (existingIdx !== -1) {
@@ -95,9 +88,7 @@ export default function CartScreen({ student, setView }) {
             return parseInt(parts[0]) * 60 + parseInt(parts[1]);
           };
           const formatFromMins = (mins) => {
-            const h = Math.floor(mins / 60)
-              .toString()
-              .padStart(2, "0");
+            const h = Math.floor(mins / 60).toString().padStart(2, "0");
             const m = (mins % 60).toString().padStart(2, "0");
             return `${h}:${m}`;
           };
@@ -130,9 +121,7 @@ export default function CartScreen({ student, setView }) {
       let str = String(t);
       if (str.includes(":")) {
         const parts = str.split(":");
-        const h = parseInt(parts[0]);
-        const m = parseInt(parts[1]);
-        return h + m / 60;
+        return parseInt(parts[0]) + parseInt(parts[1]) / 60;
       }
       return parseFloat(t) || 0;
     };
@@ -162,11 +151,7 @@ export default function CartScreen({ student, setView }) {
         style: "destructive",
         onPress: async () => {
           try {
-            await removeFromCartAPI(
-              student.student_id,
-              courseCode,
-              sectionType,
-            );
+            await removeFromCartAPI(student.student_id, courseCode, sectionType);
             fetchCart();
           } catch (e) {
             Alert.alert("ข้อผิดพลาด", e.message);
@@ -176,7 +161,106 @@ export default function CartScreen({ student, setView }) {
     ]);
   };
 
+  // 🌟 4. ฟังก์ชันเช็คชนขั้นเด็ดขาด (จับรวมวิชาในตะกร้า + ตารางเรียนมาชนกัน)
+  const checkConflicts = () => {
+    // เอาข้อมูลตะกร้า และ ตารางเรียน มารวมกันชั่วคราวเพื่อตรวจการทับซ้อน
+    const allItemsToVerify = [
+      ...items.map(c => ({ ...c, source: 'ตะกร้า' })),
+      ...enrolledItems.map(c => ({ ...c, source: 'ตารางเรียน' }))
+    ];
+
+    for (let i = 0; i < allItemsToVerify.length; i++) {
+      for (let j = i + 1; j < allItemsToVerify.length; j++) {
+        const c1 = allItemsToVerify[i];
+        const c2 = allItemsToVerify[j];
+
+        // ถ้าทั้ง 2 วิชามันอยู่ใน "ตารางเรียน" ทั้งคู่อยู่แล้ว ข้ามได้เลย ไม่ต้องตรวจ (เพราะลงไปแล้ว)
+        if (c1.source === 'ตารางเรียน' && c2.source === 'ตารางเรียน') continue;
+
+        if (!c1.day_of_week || !c2.day_of_week || !c1.start_time || !c2.start_time) continue;
+
+        const normalizeDay = (d) => {
+          const str = String(d).replace(/\s+/g, "").toLowerCase();
+          if (str.includes("จันทร์") || str.includes("mon")) return "จันทร์";
+          if (str.includes("อังคาร") || str.includes("tue")) return "อังคาร";
+          if (str.includes("พุธ") || str.includes("wed")) return "พุธ";
+          if (str.includes("พฤหัส") || str.includes("thu")) return "พฤหัสบดี";
+          if (str.includes("ศุกร์") || str.includes("fri")) return "ศุกร์";
+          if (str.includes("เสาร์") || str.includes("sat")) return "เสาร์";
+          if (str.includes("อาทิตย์") || str.includes("sun")) return "อาทิตย์";
+          return str;
+        };
+
+        const day1 = normalizeDay(c1.day_of_week);
+        const day2 = normalizeDay(c2.day_of_week);
+
+        if (day1 === day2 && day1 !== "") {
+          const parseToMins = (t) => {
+            const cleanStr = String(t).replace(/[^\d:.]/g, "");
+            const match = cleanStr.match(/(\d{1,2})[:.](\d{2})/);
+            if (match) return parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+            return 0;
+          };
+
+          const s1 = parseToMins(c1.start_time);
+          const e1 = parseToMins(c1.end_time);
+          const s2 = parseToMins(c2.start_time);
+          const e2 = parseToMins(c2.end_time);
+
+          const code1 = c1.course_code || c1.course_id || "Unknown1";
+          const code2 = c2.course_code || c2.course_id || "Unknown2";
+
+          // เช็คการลงวิชาซ้ำ (เช่น วิชานี้มีในตารางเรียนแล้ว แต่ดันมากดลงซ้ำในตะกร้า)
+          if (code1 === code2 && c1.section_number === c2.section_number && c1.section_type === c2.section_type) {
+            if (c1.source !== c2.source) {
+              return { hasConflict: true, isDuplicate: true, course1: c1, course2: c2 };
+            }
+            continue; 
+          }
+
+          // เช็คเวลาเหลื่อมกัน
+          if (s1 > 0 && e1 > 0 && s2 > 0 && e2 > 0) {
+            if (s1 < e2 && s2 < e1) {
+              return { hasConflict: true, isDuplicate: false, course1: c1, course2: c2 };
+            }
+          }
+        }
+      }
+    }
+    return { hasConflict: false };
+  };
+
   const confirmRegistration = () => {
+    if (items.length === 0) {
+      Alert.alert("แจ้งเตือน", "ตะกร้าว่างเปล่า ไม่มีวิชาให้ลงทะเบียน");
+      return;
+    }
+
+    // 🌟 5. รันฟังก์ชันตรวจจับชนก่อนที่จะเด้ง Popup ยืนยัน
+    const conflictCheck = checkConflicts();
+
+    if (conflictCheck.hasConflict) {
+      const c1 = conflictCheck.course1;
+      const c2 = conflictCheck.course2;
+      const code1 = c1.course_code || c1.course_id;
+      const code2 = c2.course_code || c2.course_id;
+
+      if (conflictCheck.isDuplicate) {
+         Alert.alert(
+          "🚨 ลงทะเบียนซ้ำซ้อน",
+          `คุณได้ลงทะเบียนวิชา ${code1} ไปในตารางเรียนแล้ว!\nโปรดลบออกจากตะกร้าก่อน`,
+          [{ text: "เข้าใจแล้ว", style: "cancel" }]
+        );
+      } else {
+        Alert.alert(
+          "🚨 พบเวลาเรียนทับซ้อน!",
+          `วิชา ${code1} (ใน${c1.source})\nทับซ้อนกับ ${code2} (ใน${c2.source})\n\nโปรดแก้ไขให้เรียบร้อยก่อนกดยืนยัน`,
+          [{ text: "ตกลง", style: "cancel" }]
+        );
+      }
+      return; // ⛔️ เตะออก ไม่ยอมให้เรียก API ลงทะเบียนเด็ดขาด!
+    }
+
     Alert.alert("ยืนยัน", "ต้องการลงทะเบียนวิชาในตะกร้าทั้งหมดหรือไม่?", [
       { text: "ยกเลิก", style: "cancel" },
       {
@@ -199,10 +283,7 @@ export default function CartScreen({ student, setView }) {
       <SafeAreaView style={styles.safeArea}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity
-            onPress={() => setView("MENU")}
-            style={styles.backButton}
-          >
+          <TouchableOpacity onPress={() => setView("MENU")} style={styles.backButton}>
             <MaterialIcons name="arrow-back" size={24} color="#7b5455" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>ตะกร้าของฉัน</Text>
@@ -211,16 +292,9 @@ export default function CartScreen({ student, setView }) {
           </TouchableOpacity>
         </View>
 
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           {loadingCart ? (
-            <ActivityIndicator
-              size="large"
-              color="#a73355"
-              style={{ marginTop: 50 }}
-            />
+            <ActivityIndicator size="large" color="#a73355" style={{ marginTop: 50 }} />
           ) : items.length === 0 ? (
             <View style={styles.emptyBox}>
               <MaterialIcons name="shopping-cart" size={80} color="#d6c2c4" />
@@ -228,43 +302,16 @@ export default function CartScreen({ student, setView }) {
             </View>
           ) : (
             <>
-              {/* 🗓️ Grid Preview (แก้ให้เลื่อนได้เหมือน ScheduleScreen) */}
+              {/* 🗓️ Grid Preview */}
               <View style={styles.gridOuterContainer}>
-                <ScrollView
-                  horizontal={true}
-                  showsHorizontalScrollIndicator={true}
-                >
-                  {/* 🌟 บวก +100px หลอกระบบให้เลื่อนได้ */}
-                  <View
-                    style={{ width: TOTAL_GRID_WIDTH + DAY_COLUMN_WIDTH + 100 }}
-                  >
+                <ScrollView horizontal={true} showsHorizontalScrollIndicator={true}>
+                  <View style={{ width: TOTAL_GRID_WIDTH + DAY_COLUMN_WIDTH + 100 }}>
                     {/* Time Labels */}
                     <View style={styles.timeHeaderRow}>
                       <View style={{ width: DAY_COLUMN_WIDTH }} />
-
-                      <View
-                        style={{
-                          flex: 1,
-                          flexDirection: "row",
-                          position: "relative",
-                        }}
-                      >
-                        {Array.from(
-                          { length: COLUMN_COUNT + 1 },
-                          (_, i) => GRID_START_HOUR + i,
-                        ).map((h, i) => (
-                          <Text
-                            key={h}
-                            style={[
-                              styles.timeLabel,
-                              {
-                                position: "absolute",
-                                left: i * ONE_HOUR_WIDTH - 10,
-                                width: 20,
-                                textAlign: "center",
-                              },
-                            ]}
-                          >
+                      <View style={{ flex: 1, flexDirection: "row", position: "relative" }}>
+                        {Array.from({ length: COLUMN_COUNT + 1 }, (_, i) => GRID_START_HOUR + i).map((h, i) => (
+                          <Text key={h} style={[styles.timeLabel, { position: "absolute", left: i * ONE_HOUR_WIDTH - 10, width: 20, textAlign: "center" }]}>
                             {h}
                           </Text>
                         ))}
@@ -272,79 +319,32 @@ export default function CartScreen({ student, setView }) {
                     </View>
 
                     {/* Day Rows */}
-                    {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(
-                      (dayKey) => (
-                        <View key={dayKey} style={styles.dayRow}>
-                          <View style={styles.dayLabelContainer}>
-                            {/* 🌟 แสดงชื่อวันแบบเต็ม "วันจันทร์" */}
-                            <Text style={styles.dayTextTh}>
-                              วัน{DAY_MAP[dayKey]}
-                            </Text>
-                          </View>
-                          <View
-                            style={[
-                              styles.gridContent,
-                              { width: TOTAL_GRID_WIDTH },
-                            ]}
-                          >
-                            {/* เส้นแบ่งเวลาแนวตั้ง */}
-                            {Array.from({ length: COLUMN_COUNT + 1 }).map(
-                              (_, i) => (
-                                <View
-                                  key={i}
-                                  style={[
-                                    styles.vLine,
-                                    { left: i * ONE_HOUR_WIDTH },
-                                  ]}
-                                />
-                              ),
-                            )}
-
-                            {/* วิชาที่เรียนในวันนี้ */}
-                            {scheduleData
-                              .filter((course) => {
-                                const d = course.day_of_week;
-                                return (
-                                  d === dayKey || DAY_MAP[d] === DAY_MAP[dayKey]
-                                );
-                              })
-                              .map((item, idx) => {
-                                const pos = getBoxStyle(
-                                  item.start_time,
-                                  item.end_time,
-                                );
-                                return (
-                                  <View
-                                    key={`${item.course_code}-${idx}`}
-                                    style={[
-                                      styles.courseBox,
-                                      {
-                                        left: pos.left + 1,
-                                        width: pos.width - 2,
-                                      },
-                                    ]}
-                                  >
-                                    <Text
-                                      style={styles.boxCode}
-                                      numberOfLines={1}
-                                    >
-                                      {item.course_code}
-                                    </Text>
-                                    {/* 🌟 แสดงเวลาแบบ 9.00-11.00 */}
-                                    <Text
-                                      style={styles.boxTime}
-                                      numberOfLines={1}
-                                    >
-                                      {formatTimeDisplay(item.start_time)}-
-                                      {formatTimeDisplay(item.end_time)}
-                                    </Text>
-                                  </View>
-                                );
-                              })}
-                          </View>
+                    {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((dayKey) => (
+                      <View key={dayKey} style={styles.dayRow}>
+                        <View style={styles.dayLabelContainer}>
+                          <Text style={styles.dayTextTh}>วัน{DAY_MAP[dayKey]}</Text>
                         </View>
-                      ),
-                    )}
+                        <View style={[styles.gridContent, { width: TOTAL_GRID_WIDTH }]}>
+                          {Array.from({ length: COLUMN_COUNT + 1 }).map((_, i) => (
+                            <View key={i} style={[styles.vLine, { left: i * ONE_HOUR_WIDTH }]} />
+                          ))}
+
+                          {scheduleData
+                            .filter((course) => course.day_of_week === DAY_MAP[dayKey])
+                            .map((item, idx) => {
+                              const pos = getBoxStyle(item.start_time, item.end_time);
+                              return (
+                                <View key={`${item.course_code}-${idx}`} style={[styles.courseBox, { left: pos.left + 1, width: pos.width - 2 }]}>
+                                  <Text style={styles.boxCode} numberOfLines={1}>{item.course_code}</Text>
+                                  <Text style={styles.boxTime} numberOfLines={1}>
+                                    {formatTimeDisplay(item.start_time)}-{formatTimeDisplay(item.end_time)}
+                                  </Text>
+                                </View>
+                              );
+                            })}
+                        </View>
+                      </View>
+                    ))}
                   </View>
                 </ScrollView>
               </View>
@@ -353,69 +353,33 @@ export default function CartScreen({ student, setView }) {
               <Text style={styles.sectionTitle}>รายละเอียดวิชา</Text>
               {items.map((item, idx) => {
                 const dayStr = item.day_of_week || "";
-                const startTime = item.start_time
-                  ? item.start_time.substring(0, 5)
-                  : "";
-                const endTime = item.end_time
-                  ? item.end_time.substring(0, 5)
-                  : "";
+                const startTime = item.start_time ? item.start_time.substring(0, 5) : "";
+                const endTime = item.end_time ? item.end_time.substring(0, 5) : "";
 
                 return (
-                  <View
-                    key={`${item.course_code || item.course_id}-${item.section_type}-${idx}`}
-                    style={styles.detailCard}
-                  >
+                  <View key={`${item.course_code || item.course_id}-${item.section_type}-${idx}`} style={styles.detailCard}>
                     <View style={styles.cardAccent} />
-
                     <View style={styles.cardBody}>
                       <View style={styles.cardTop}>
                         <Text style={styles.detailCode}>
-                          {item.course_code || item.course_id} Sec{" "}
-                          {item.section_number || "1"}{" "}
-                          {item.section_type ? `(${item.section_type})` : ""}
+                          {item.course_code || item.course_id} Sec {item.section_number || "1"} {item.section_type ? `(${item.section_type})` : ""}
                         </Text>
                         <Text style={styles.detailTime}>
-                          {dayStr && startTime
-                            ? `วัน${DAY_MAP[dayStr] || dayStr} ${startTime}-${endTime} น.`
-                            : "ไม่มีข้อมูลเวลาเรียน"}
+                          {dayStr && startTime ? `วัน${DAY_MAP[dayStr] || dayStr} ${startTime}-${endTime} น.` : "ไม่มีข้อมูลเวลาเรียน"}
                         </Text>
                       </View>
-
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                        }}
-                      >
-                        <Text style={styles.courseName} numberOfLines={1}>
-                          {item.course_name}
-                        </Text>
-                        <TouchableOpacity
-                          onPress={() =>
-                            removeItem(
-                              item.course_code || item.course_id,
-                              item.section_type,
-                            )
-                          }
-                          style={{ padding: 4 }}
-                        >
+                      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                        <Text style={styles.courseName} numberOfLines={1}>{item.course_name}</Text>
+                        <TouchableOpacity onPress={() => removeItem(item.course_code || item.course_id, item.section_type)} style={{ padding: 4 }}>
                           <Feather name="trash-2" size={18} color="#E53935" />
                         </TouchableOpacity>
                       </View>
-
                       <View style={styles.cardBottom}>
                         <Text style={styles.metaText}>
-                          {item.credits
-                            ? `${item.credits} หน่วยกิต`
-                            : "ไม่ระบุหน่วยกิต"}
+                          {item.credits ? `${item.credits} หน่วยกิต` : "ไม่ระบุหน่วยกิต"}
                         </Text>
                         <Text style={styles.metaText}>
-                          {item.section_type === "T"
-                            ? "ทฤษฎี"
-                            : item.section_type === "L"
-                              ? "ปฏิบัติ"
-                              : ""}
+                          {item.section_type === "T" ? "ทฤษฎี" : item.section_type === "L" ? "ปฏิบัติ" : ""}
                         </Text>
                       </View>
                     </View>
@@ -423,38 +387,22 @@ export default function CartScreen({ student, setView }) {
                 );
               })}
 
-              {/* Confirm Button */}
-              <TouchableOpacity
-                style={styles.confirmButton}
-                onPress={confirmRegistration}
-              >
-                <LinearGradient
-                  colors={["#a73355", "#7b1d3a"]}
-                  style={styles.gradientButton}
-                >
+              <TouchableOpacity style={styles.confirmButton} onPress={confirmRegistration}>
+                <LinearGradient colors={["#a73355", "#7b1d3a"]} style={styles.gradientButton}>
                   <MaterialIcons name="check-circle" size={24} color="white" />
-                  <Text style={styles.confirmButtonText}>
-                    ยืนยันการลงทะเบียน
-                  </Text>
+                  <Text style={styles.confirmButtonText}>ยืนยันการลงทะเบียน</Text>
                 </LinearGradient>
               </TouchableOpacity>
             </>
           )}
         </ScrollView>
 
-        {/* Floating Bottom Nav */}
         <View style={styles.bottomNav}>
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setView("MENU")}
-          >
+          <TouchableOpacity style={styles.navItem} onPress={() => setView("MENU")}>
             <MaterialIcons name="home" size={24} color="#837375" />
             <Text style={styles.navText}>HOME</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setView("MANUAL")}
-          >
+          <TouchableOpacity style={styles.navItem} onPress={() => setView("MANUAL")}>
             <MaterialIcons name="search" size={24} color="#837375" />
             <Text style={styles.navText}>SEARCH</Text>
           </TouchableOpacity>
@@ -462,10 +410,7 @@ export default function CartScreen({ student, setView }) {
             <MaterialIcons name="shopping-cart" size={24} color="#a73355" />
             <Text style={styles.navTextActive}>CART</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setView("SCHEDULE")}
-          >
+          <TouchableOpacity style={styles.navItem} onPress={() => setView("SCHEDULE")}>
             <MaterialIcons name="calendar-today" size={24} color="#837375" />
             <Text style={styles.navText}>SCHEDULE</Text>
           </TouchableOpacity>
@@ -533,7 +478,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: 0,
   },
-  
+
   boxCode: { fontSize: 7, fontWeight: "bold", color: "#333333" },
   boxTime: { fontSize: 6, color: "#666666", marginTop: 1 },
 

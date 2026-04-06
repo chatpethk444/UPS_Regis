@@ -24,6 +24,8 @@ import {
   getScheduleAPI,
 } from "../api";
 
+
+
 const { width } = Dimensions.get("window");
 const GRID_START_HOUR = 8;
 const GRID_END_HOUR = 19;
@@ -71,6 +73,8 @@ export default function AIScreen({ student, setView }) {
   const [zOptions, setZOptions] = useState([]);
   const [zTargetCourse, setZTargetCourse] = useState(null);
   const [zLoading, setZLoading] = useState(false);
+  const [cartItems, setCartItems] = useState([]);
+  const [enrolledSchedule, setEnrolledSchedule] = useState([]);
 
   // 🌟 1. ดึงข้อมูลทุกอย่างพร้อมกัน (เร็วขึ้น 3 เท่า)
   useEffect(() => {
@@ -85,9 +89,25 @@ export default function AIScreen({ student, setView }) {
             getAvailableCoursesAPI(student.student_id).catch(() => []),
           ]);
 
-          const carts = Array.isArray(cartData) ? cartData : [];
+          const carts = Array.isArray(cartData) 
+            ? cartData.filter(c => c.suggested_semester == 2) 
+            : [];
           const scheds = Array.isArray(scheduleData) ? scheduleData : [];
-          const courses = Array.isArray(coursesData) ? coursesData : [];
+          const courses = Array.isArray(coursesData) 
+  ? coursesData.filter(c => c.suggested_semester == 2) 
+  : [];
+
+          // 🌟 2. เซฟข้อมูลแบบเต็มๆ เก็บไว้ให้ระบบเช็คเวลาชน
+          setCartItems(carts);
+          setEnrolledSchedule(scheds);
+
+          setCartCourseCodes(
+            carts.map((c) => c.course_code || c.course_id || ""),
+          );
+          setScheduleCourseCodes(
+            scheds.map((c) => c.course_code || c.course_id || ""),
+          );
+          setAvailableCourses(courses);
 
           setCartCourseCodes(
             carts.map((c) => c.course_code || c.course_id || ""),
@@ -131,7 +151,13 @@ export default function AIScreen({ student, setView }) {
     setLoadingCourses(true);
     try {
       const data = await getAvailableCoursesAPI(student.student_id);
-      setAvailableCourses(Array.isArray(data) ? data : []);
+      
+      // ของเดิม: setAvailableCourses(Array.isArray(data) ? data : []);
+      
+      // ✅ เปลี่ยนเป็น: กรองเอาเฉพาะเทอม 2
+      setAvailableCourses(
+        Array.isArray(data) ? data.filter(c => c.suggested_semester == 2) : []
+      );
     } catch (err) {
       console.error(err);
     } finally {
@@ -190,11 +216,231 @@ export default function AIScreen({ student, setView }) {
     }
   };
 
- const handleAcceptSuggestion = async (plan) => {
+  const handleAcceptSuggestion = async (plan) => {
     setCalculating(true);
     try {
-      const { BASE_URL } = require("../api");
+      // 🌟 1. ดึงข้อมูลสด
+      const [freshCart, freshSchedule] = await Promise.all([
+        getCartAPI(student.student_id).catch(() => []),
+        getScheduleAPI(student.student_id).catch(() => []),
+      ]);
 
+      const allExistingItems = [
+        ...(Array.isArray(freshCart) ? freshCart : []).map((c) => ({
+          ...c,
+          source: "ตะกร้า",
+        })),
+        ...(Array.isArray(freshSchedule) ? freshSchedule : []).map((c) => ({
+          ...c,
+          source: "ตารางเรียน",
+        })),
+      ];
+
+      // 🌟 2. แปลงวัน
+      const normalizeDay = (d) => {
+        if (!d) return "";
+        const s = String(d).replace(/\s+/g, "").toLowerCase();
+        if (
+          s === "จ" ||
+          s === "จ." ||
+          s.includes("จันทร์") ||
+          s.includes("mon")
+        )
+          return "จันทร์";
+        if (
+          s === "อ" ||
+          s === "อ." ||
+          s.includes("อังคาร") ||
+          s.includes("tue")
+        )
+          return "อังคาร";
+        if (
+          s === "พ" ||
+          s === "พ." ||
+          s === "พุธ" ||
+          s.includes("พุธ") ||
+          s.includes("wed")
+        )
+          return "พุธ";
+        if (s.includes("พฤ") || s.includes("thu")) return "พฤหัสบดี";
+        if (s === "ศ" || s === "ศ." || s.includes("ศุกร์") || s.includes("fri"))
+          return "ศุกร์";
+        if (s === "ส" || s === "ส." || s.includes("เสาร์") || s.includes("sat"))
+          return "เสาร์";
+        if (
+          s === "อา" ||
+          s === "อา." ||
+          s.includes("อาทิตย์") ||
+          s.includes("sun")
+        )
+          return "อาทิตย์";
+        return s;
+      };
+
+      // 🌟 3. ตัวแปลงเวลา
+      const parseToMins = (t) => {
+        if (t === null || t === undefined || t === "") return 0;
+        let str = String(t).replace(/[^0-9:.]/g, "");
+        if (!str) return 0;
+
+        if (str.includes(":") || str.includes(".")) {
+          str = str.replace(".", ":");
+          let parts = str.split(":");
+          let h = parseInt(parts[0], 10) || 0;
+          let m = parseInt(parts[1], 10) || 0;
+          return h * 60 + m;
+        } else {
+          let h = parseInt(str, 10) || 0;
+          return h * 60;
+        }
+      };
+
+      // 🌟 4. สกัดเวลาจาก Object
+      const extractSlots = (course) => {
+        let slots = [];
+        if (course.day_of_week && course.start_time && course.end_time) {
+          slots.push({
+            day: normalizeDay(course.day_of_week),
+            start: parseToMins(course.start_time),
+            end: parseToMins(course.end_time),
+          });
+        }
+        if (Array.isArray(course.class_times)) {
+          course.class_times.forEach((ct) => {
+            if (
+              ct.day &&
+              (ct.start !== undefined || ct.start_time) &&
+              (ct.end !== undefined || ct.end_time)
+            ) {
+              slots.push({
+                day: normalizeDay(ct.day),
+                start: parseToMins(
+                  ct.start !== undefined ? ct.start : ct.start_time,
+                ),
+                end: parseToMins(ct.end !== undefined ? ct.end : ct.end_time),
+              });
+            }
+          });
+        }
+        if (
+          slots.length === 0 &&
+          course.day &&
+          course.start !== undefined &&
+          course.end !== undefined
+        ) {
+          slots.push({
+            day: normalizeDay(course.day),
+            start: parseToMins(course.start),
+            end: parseToMins(course.end),
+          });
+        }
+        return slots;
+      };
+
+      let conflictsList = [];
+
+      // 🌟 5. ตรวจสอบการทับซ้อน
+      for (let p of plan) {
+        const pCode = p.course_code || p.course_id;
+        const pSlots = extractSlots(p);
+
+        if (pSlots.length === 0) continue;
+
+        for (let ex of allExistingItems) {
+          const exCode = ex.course_code || ex.course_id;
+          const exSlots = extractSlots(ex);
+
+          // ดักวิชาซ้ำ
+          if (pCode === exCode) {
+            const alreadyLogged = conflictsList.find(
+              (c) => c.type === "duplicate" && c.pCode === pCode,
+            );
+            if (!alreadyLogged) {
+              conflictsList.push({
+                type: "duplicate",
+                pCode,
+                source: ex.source,
+              });
+            }
+            continue;
+          }
+
+          // เทียบเวลา
+          for (let pSlot of pSlots) {
+            for (let exSlot of exSlots) {
+              if (pSlot.day && exSlot.day && pSlot.day === exSlot.day) {
+                if (
+                  pSlot.start > 0 &&
+                  pSlot.end > 0 &&
+                  exSlot.start > 0 &&
+                  exSlot.end > 0
+                ) {
+                  if (pSlot.start < exSlot.end && exSlot.start < pSlot.end) {
+                    // 🌟 แก้ไขตรงนี้: เพิ่มการเช็ค c.pSlot.day === pSlot.day
+                    // เพื่อให้วิชาคู่เดิม ถ้าชนกันคนละวัน ก็ต้องแจ้งเตือนทั้ง 2 วัน
+                    const alreadyLogged = conflictsList.find(
+                      (c) =>
+                        c.type === "time" &&
+                        c.pCode === pCode &&
+                        c.exCode === exCode &&
+                        c.pSlot.day === pSlot.day,
+                    );
+
+                    if (!alreadyLogged) {
+                      conflictsList.push({
+                        type: "time",
+                        pCode,
+                        exCode,
+                        source: ex.source,
+                        pSlot,
+                        exSlot,
+                      });
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+
+      
+      // 🌟 6. แสดงผลการทับซ้อน
+      if (conflictsList.length > 0) {
+        setCalculating(false);
+
+        const formatMins = (mins) => {
+          const h = Math.floor(mins / 60)
+            .toString()
+            .padStart(2, "0");
+          const m = (mins % 60).toString().padStart(2, "0");
+          return `${h}:${m}`;
+        };
+
+        let errorMessage = "พบข้อผิดพลาดในแผนการเรียนนี้:\n\n";
+
+        conflictsList.forEach((c, idx) => {
+          if (c.type === "duplicate") {
+            errorMessage += `${idx + 1}. ⛔️ วิชา ${c.pCode} (คุณลงใน${c.source}ไว้แล้ว)\n\n`;
+          } else if (c.type === "time") {
+            const pTime = `${c.pSlot.day} ${formatMins(c.pSlot.start)}-${formatMins(c.pSlot.end)}`;
+            const exTime = `${c.exSlot.day} ${formatMins(c.exSlot.start)}-${formatMins(c.exSlot.end)}`;
+
+            errorMessage += `${idx + 1}. ⏰ เวลาชนกัน:\n   [AI แนะนำ] ${c.pCode} เรียน ${pTime}\n   [${c.source}] ${c.exCode} เรียน ${exTime}\n\n`;
+          }
+        });
+
+        Alert.alert(
+          "ไม่สามารถลงทะเบียนได้",
+          errorMessage + "โปรดเลือก Plan อื่น หรือ ลบวิชาที่ชนกันออก",
+          [{ text: "เข้าใจแล้ว", style: "cancel" }],
+        );
+        return;
+      }
+
+      // --- 🌟 7. ถ้ารอดมาได้ (ไม่มีชนเลย) ให้ส่ง API ยืนยันแผนลงตะกร้า ---
+      const { BASE_URL } = require("../api");
       const uniqueCourses = [];
       const seenKeys = new Set();
 
@@ -209,43 +455,36 @@ export default function AIScreen({ student, setView }) {
         }
       }
 
-      // 🌟 1. จัดรูปแบบข้อมูลให้เป็น Array เพื่อส่งไปเช็กทีเดียว
-      const items = uniqueCourses.map((rawSec) => ({
+      const itemsToBackend = uniqueCourses.map((rawSec) => ({
         course_code: rawSec?.course_code || rawSec?.course_id || rawSec?.code,
         section_number: String(rawSec?.section_number || rawSec?.sec || 1),
         section_type: rawSec?.section_type || "T",
       }));
 
-      // 🌟 2. ส่งไปให้ Backend เช็กเวลาชนกับตะกร้าปัจจุบัน (ใช้ batch_add_with_check)
       const res = await fetch(`${BASE_URL}/cart/batch_add_with_check`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           student_id: student.student_id,
-          items: items, // ส่งไปทั้งแผนเลย
+          items: itemsToBackend,
         }),
       });
 
       const data = await res.json();
 
-      // 🌟 3. ถ้า Backend ตอบกลับมาว่ามีวิชาชนกัน ให้แจ้งเตือนและหยุดทำงาน
       if (data.status === "conflict") {
-        const conflictMsg = data.conflicts
-          .map((c) => `- วิชา ${c.course_code} (Sec ${c.requested_section})`)
-          .join("\n");
-          
         Alert.alert(
-          "พบเวลาเรียนชนกัน!",
-          `แผนการเรียนที่เลือก มีเวลาเรียนทับซ้อนกับวิชาในตะกร้า/ตารางเรียนของคุณ:\n\n${conflictMsg}\n\nกรุณาเคลียร์วิชาในตะกร้าออกก่อน หรือจัดแผนใหม่`,
+          "พบเวลาเรียนชนกันจากระบบหลังบ้าน!",
+          "กรุณาเคลียร์วิชาในตะกร้าออกก่อน",
         );
-        return; // สั่งหยุด ไม่เพิ่มลงตะกร้า
+        return;
       }
 
       if (!res.ok) {
         throw new Error(data.detail || "เกิดข้อผิดพลาดจากเซิร์ฟเวอร์");
       }
 
-      Alert.alert("สำเร็จ!", "เพิ่มแผนการเรียนลงตะกร้าเรียบร้อยแล้ว", [
+      Alert.alert("สำเร็จ!", "เพิ่มแผนการเรียนที่เลือก ลงตะกร้าเรียบร้อยแล้ว", [
         { text: "ไปที่ตะกร้า", onPress: () => setView("CART") },
       ]);
     } catch (err) {
@@ -254,7 +493,6 @@ export default function AIScreen({ student, setView }) {
       setCalculating(false);
     }
   };
-
   const getBoxStyle = (startTime, endTime) => {
     const parseTime = (t) => {
       if (typeof t === "number") return t;
@@ -515,7 +753,10 @@ export default function AIScreen({ student, setView }) {
                                           style={styles.boxCode}
                                           numberOfLines={1}
                                         >
-                                          {item.course_code}
+                                          {item.course_code}{" "}
+                                          {item.section_type
+                                            ? `(${item.section_type})`
+                                            : ""}
                                         </Text>
                                         <Text
                                           style={styles.boxTime}
@@ -574,11 +815,42 @@ export default function AIScreen({ student, setView }) {
                                 courseInfo?.course_name ||
                                 item.course_name ||
                                 "ไม่ระบุชื่อวิชา";
-                              const isLab =
-                                item.type === "L" ||
-                                item.section_type === "L" ||
-                                parseInt(item.section_number || "1") >= 50;
-                              const secNum = String(item.section_number || "1");
+
+                              const secNum = String(
+                                item.section_number || item.sec || "1",
+                              );
+                              const secType =
+                                item.section_type || item.type || "T"; // 🌟 ดึงประเภท ทฤษฎี/ปฏิบัติ
+
+                              // 🌟 คำนวณที่นั่งคงเหลือ (แก้บั๊กการเช็ค Type ให้รองรับข้อมูลที่เป็น String จาก API)
+                              let remainSeatsText = "";
+
+                              if (
+                                courseInfo &&
+                                courseInfo.sections &&
+                                courseInfo.sections[secNum]
+                              ) {
+                                const slots = courseInfo.sections[secNum];
+                                // หาสล็อตที่ตรงกับ T หรือ L
+                                const targetSlot =
+                                  slots.find(
+                                    (s) => s.section_type === secType,
+                                  ) || slots[0];
+
+                                // เช็คแค่ว่ามีข้อมูล max_seats ส่งมาไหม
+                                if (targetSlot && targetSlot.max_seats != null) {
+                                  const cap = Number(targetSlot.max_seats) || 0;
+                                  const enr = Number(targetSlot.enrolled_seats) || 0;
+                                  const remain = cap - enr;
+                                  remainSeatsText = `  |  ว่าง: ${remain > 0 ? remain : 0}/${cap}`;
+                                }
+                              } else if (item.max_seats != null) {
+                                // กรณี AI ส่งข้อมูล max_seats มาให้ตรงๆ
+                                const cap = Number(item.max_seats) || 0;
+                                const enr = Number(item.enrolled_seats) || 0;
+                                const remain = cap - enr;
+                                remainSeatsText = `  |  ว่าง: ${remain > 0 ? remain : 0}/${cap}`;
+                              }
 
                               return (
                                 <TouchableOpacity
@@ -601,15 +873,52 @@ export default function AIScreen({ student, setView }) {
                                       <View style={styles.timelineLine} />
                                     )}
                                   </View>
+
+                                  {/* 🌟 แก้ไขการแสดงผลรายละเอียดด้านขวา */}
                                   <View style={styles.timelineDetailCol}>
                                     <Text style={styles.timelineCodeText}>
                                       {item.course_code}
+                                      {/* ป้ายบอก ทฤษฎี/ปฏิบัติ สวยๆ */}
+                                      <Text
+                                        style={{
+                                          color:
+                                            secType === "T"
+                                              ? "#2E7D32"
+                                              : "#C62828",
+                                          fontSize: 13,
+                                          fontWeight: "normal",
+                                        }}
+                                      >
+                                        {secType === "T"
+                                          ? " (ทฤษฎี)"
+                                          : secType === "L"
+                                            ? " (ปฏิบัติ)"
+                                            : ""}
+                                      </Text>
                                     </Text>
-                                    <Text style={styles.timelineCodeText}>
+                                    <Text
+                                      style={styles.timelineCodeText}
+                                      numberOfLines={1}
+                                    >
                                       {courseName}
                                     </Text>
                                     <Text style={styles.timelineSubText}>
                                       กลุ่ม: {secNum}
+                                      {remainSeatsText}
+                                    </Text>
+                                    {/* ✅ เพิ่มส่วนนี้เข้าไป */}
+                                    <Text
+                                      style={[
+                                        styles.metaText,
+                                        {
+                                          color:
+                                            item.enrolled_seats >= item.max_seats
+                                              ? "red"
+                                              : "#837375",
+                                        },
+                                      ]}
+                                    >
+                                      ที่นั่ง: {item.enrolled_seats ?? 0}/{item.max_seats ?? 0}
                                     </Text>
                                   </View>
                                 </TouchableOpacity>
@@ -663,8 +972,9 @@ export default function AIScreen({ student, setView }) {
 
                       const isLocked = inCart || inSchedule;
                       let lockReason = "";
-                      if (inCart) lockReason = " (ในตะกร้า)";
-                      else if (inSchedule) lockReason = " (ในตาราง)";
+                      if (inCart) lockReason = " (มีรายวิชาอยู่ในตะกร้าแล้ว)";
+                      else if (inSchedule)
+                        lockReason = " (มีรายวิชาอยู่ในตารางแล้ว)";
 
                       return (
                         <TouchableOpacity
@@ -1268,6 +1578,11 @@ const styles = StyleSheet.create({
     color: "#514345", // สีเทาเข้ม อ่านง่าย สบายตา
     marginBottom: 4,
     lineHeight: 18,
+  },
+  metaText: {
+    fontSize: 11,
+    color: "#837375",
+    marginTop: 2,
   },
   modalBackground: {
     flex: 1,

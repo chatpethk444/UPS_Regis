@@ -1,52 +1,86 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, ScrollView, Modal, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, ScrollView, ActivityIndicator, Alert, Dimensions } from 'react-native';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { getSuggestedCoursesAPI, batchAddWithCheckAPI, getCartAPI } from '../api';
 
-const DAY_MAP = { Mon: "จันทร์", Tue: "อังคาร", Wed: "พุธ", Thu: "พฤหัสบดี", Fri: "ศุกร์", Sat: "เสาร์", Sun: "อาทิตย์" };
+import { getSuggestedCoursesAPI, batchAddWithCheckAPI, getCartAPI, getScheduleAPI, aiSuggestAPI } from '../api';
+
+const { width } = Dimensions.get("window");
+const GRID_START_HOUR = 8;
+const GRID_END_HOUR = 19;
+const COLUMN_COUNT = GRID_END_HOUR - GRID_START_HOUR;
+
+const ONE_HOUR_WIDTH = 25;
+const DAY_COLUMN_WIDTH = 60;
+const TOTAL_GRID_WIDTH = ONE_HOUR_WIDTH * COLUMN_COUNT;
+
+const DAY_MAP = {
+  Mon: "จันทร์",
+  Tue: "อังคาร",
+  Wed: "พุธ",
+  Thu: "พฤหัสบดี",
+  Fri: "ศุกร์",
+  Sat: "เสาร์",
+  Sun: "อาทิตย์",
+  Monday: "จันทร์",
+  Tuesday: "อังคาร",
+  Wednesday: "พุธ",
+  Thursday: "พฤหัสบดี",
+  Friday: "ศุกร์",
+  จันทร์: "จันทร์",
+  อังคาร: "อังคาร",
+  พุธ: "พุธ",
+  พฤหัส: "พฤหัสบดี",
+  ศุกร์: "ศุกร์",
+  เสาร์: "เสาร์",
+  อาทิตย์: "อาทิตย์",
+};
+
+const DAY_ORDER = {
+  Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7,
+  Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6, Sunday: 7,
+  จันทร์: 1, อังคาร: 2, พุธ: 3, พฤหัสบดี: 4, ศุกร์: 5, เสาร์: 6, อาทิตย์: 7
+};
 
 export default function RegistrationScreen({ student, setView }) {
   const [courses, setCourses] = useState([]);
   const [cartCourseCodes, setCartCourseCodes] = useState([]);
+  const [enrolledCourseCodes, setEnrolledCourseCodes] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedData, setSelectedData] = useState({});
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [conflictData, setConflictData] = useState(null);
+  const [selectedCodes, setSelectedCodes] = useState([]);
+  const [suggestions, setSuggestions] = useState([]);
+  const [calculating, setCalculating] = useState(false);
 
   useEffect(() => {
     fetchData();
   }, []);
 
-  const fetchData = async () => {
+const fetchData = async () => {
+    setLoading(true);
     try {
-      // 1. ดึงข้อมูลวิชาที่อยู่ในตะกร้าปัจจุบันมาเก็บไว้เช็ค
-      const cart = await getCartAPI(student.student_id);
+      const [cart, schedule, suggested] = await Promise.all([
+        getCartAPI(student.student_id).catch(() => []),
+        getScheduleAPI(student.student_id).catch(() => []),
+        getSuggestedCoursesAPI(student.student_id).catch(() => [])
+      ]);
+
       const cartCodes = cart.map(c => c.course_code || c.course_id);
-      setCartCourseCodes(cartCodes);
-
-      // 2. ดึงวิชาที่แนะนำ
-      const data = await getSuggestedCoursesAPI(student.student_id);
-      setCourses(data);
+      const scheduleCodes = schedule.map(c => c.course_code || c.course_id);
       
-      // Auto-select วิชาที่ยังไม่มีในตะกร้า
-      const initSelect = {};
-      data.forEach(c => {
-        let firstT = null;
-        let firstL = null;
-        Object.keys(c.sections).forEach(secNum => {
-          c.sections[secNum].forEach(slot => {
-            if (slot.section_type === 'T' && !firstT) firstT = secNum;
-            if (slot.section_type === 'L' && !firstL) firstL = secNum;
-          });
-        });
+      // ❌ เอาการกรองเทอม (.filter) ออกไปเลยครับ เพราะ Backend ไม่ได้ส่งเทอมมาให้
+      
+      setCartCourseCodes(cartCodes);
+      setEnrolledCourseCodes(scheduleCodes);
+      
+      // ✅ ใช้วิชาทั้งหมดที่ API (suggested) ส่งมาให้แสดงผลเลย
+      setCourses(suggested); 
 
-        // ถ้ายังไม่มีในตะกร้า ให้ตั้งค่าเริ่มต้นให้
-        if (!cartCodes.includes(c.course_code)) {
-          initSelect[c.course_code] = { checked: true, secT: firstT, secL: firstL };
-        }
-      });
-      setSelectedData(initSelect);
+      // ✅ เซ็ต Checkbox เริ่มต้น
+      const initialCodes = suggested
+        .map(c => c.course_code)
+        .filter(code => !cartCodes.includes(code) && !scheduleCodes.includes(code));
+      
+      setSelectedCodes(initialCodes);
     } catch (e) {
       Alert.alert("ข้อผิดพลาด", e.message);
     } finally {
@@ -54,72 +88,87 @@ export default function RegistrationScreen({ student, setView }) {
     }
   };
 
-  const toggleCheck = (code) => {
-    // เช็คเงื่อนไข: ถ้ามีในตะกร้าแล้ว ห้ามกดเลือกเด็ดขาด
+  const toggleCourse = (code) => {
+    if (enrolledCourseCodes.includes(code)) {
+      return Alert.alert("ไม่สามารถเลือกได้", "คุณลงทะเบียนวิชานี้ไปแล้ว");
+    }
     if (cartCourseCodes.includes(code)) {
-      Alert.alert("ไม่สามารถเพิ่มได้", `รายวิชา ${code} มีอยู่ในตะกร้าของคุณแล้ว`);
-      return;
+      return Alert.alert("ไม่สามารถเลือกได้", "วิชานี้อยู่ในตะกร้าแล้ว");
     }
-
-    setSelectedData(prev => ({
-      ...prev,
-      [code]: { ...prev[code], checked: !prev[code]?.checked }
-    }));
+    setSelectedCodes(prev => 
+      prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]
+    );
   };
 
-  const changeSection = (code, typeField, sec) => {
-    setSelectedData(prev => ({
-      ...prev,
-      [code]: { ...prev[code], [typeField]: sec }
-    }));
-  };
-
-  const handleRegister = async () => {
-    const items = [];
-    Object.entries(selectedData).forEach(([code, val]) => {
-      if (val.checked) {
-        // แยกส่ง T และ L เป็นคนละก้อน ทำให้เลือก Sec สลับกันได้
-        if (val.secT) items.push({ course_code: code, section_number: val.secT, section_type: 'T' });
-        if (val.secL) items.push({ course_code: code, section_number: val.secL, section_type: 'L' });
-      }
-    });
-      
-    if (items.length === 0) {
-      Alert.alert("แจ้งเตือน", "กรุณาเลือกอย่างน้อย 1 วิชา");
-      return;
-    }
-
-    setIsSubmitting(true);
+  const handleGeneratePlans = async () => {
+    if (selectedCodes.length === 0) return Alert.alert("แจ้งเตือน", "กรุณาเลือกวิชาเป้าหมาย");
+    setCalculating(true);
     try {
+      const result = await aiSuggestAPI(student.student_id, selectedCodes);
+      setSuggestions(result || []);
+    } catch (err) {
+      Alert.alert("Error", err.message);
+    } finally {
+      setCalculating(false);
+    }
+  };
+
+  const handleAcceptPlan = async (plan) => {
+    setCalculating(true);
+    try {
+      const items = plan.map(item => ({
+        course_code: item.course_code,
+        section_number: String(item.section_number),
+        section_type: item.section_type
+      }));
+
       const res = await batchAddWithCheckAPI(student.student_id, items);
       if (res.status === "conflict") {
-        setConflictData(res.conflicts); 
+        Alert.alert("พบเวลาเรียนชนกัน", "กรุณาเคลียร์วิชาในตะกร้าหรือเลือกแผนอื่น");
       } else {
-        Alert.alert("สำเร็จ", "เพิ่มวิชาลงตะกร้าเรียบร้อยแล้ว!");
-        setView("CART");
+        Alert.alert("สำเร็จ", "เพิ่มแผนการเรียนลงตะกร้าเรียบร้อยแล้ว", [
+          { text: "ไปที่ตะกร้า", onPress: () => setView("CART") }
+        ]);
       }
     } catch (e) {
       Alert.alert("ข้อผิดพลาด", e.message);
     } finally {
-      setIsSubmitting(false);
+      setCalculating(false);
     }
   };
 
-  const resolveConflict = (course_code, section_type, suggested_section) => {
-    if (!suggested_section) {
-      // ไม่มี Sec ว่างให้ติ๊กวิชานี้ออกไปเลย
-      setSelectedData(prev => ({ ...prev, [course_code]: { ...prev[course_code], checked: false } }));
-    } else {
-      // เปลี่ยนไปใช้ Sec ที่ไม่ชน
-      const typeField = section_type === 'T' ? 'secT' : 'secL';
-      setSelectedData(prev => ({ ...prev, [course_code]: { ...prev[course_code], [typeField]: suggested_section } }));
+  const formatTimeDisplay = (time) => {
+    if (time == null) return "";
+    let str = String(time);
+    if (str.includes(":")) {
+      const [h, m] = str.split(":");
+      return `${parseInt(h)}.${m}`;
     }
-    
-    setConflictData(prev => {
-      const remaining = prev.filter(c => !(c.course_code === course_code && c.section_type === section_type));
-      if (remaining.length === 0) return null; 
-      return remaining;
-    });
+    if (str.includes(".")) {
+      const [h, m] = str.split(".");
+      const mins = Math.round(parseFloat(`0.${m}`) * 60)
+        .toString()
+        .padStart(2, "0");
+      return `${h}.${mins}`;
+    }
+    return `${str}.00`;
+  };
+
+  const getBoxStyle = (startTime, endTime) => {
+    const parseTime = (t) => {
+      if (typeof t === "number") return t;
+      if (typeof t === "string" && t.includes(":")) {
+        const [h, m] = t.split(":").map(Number);
+        return h + m / 60;
+      }
+      return parseFloat(t) || 0;
+    };
+    const s = parseTime(startTime);
+    const e = parseTime(endTime);
+    return {
+      left: (s - GRID_START_HOUR) * ONE_HOUR_WIDTH,
+      width: (e - s) * ONE_HOUR_WIDTH,
+    };
   };
 
   return (
@@ -129,172 +178,193 @@ export default function RegistrationScreen({ student, setView }) {
           <TouchableOpacity onPress={() => setView("MENU")} style={styles.backButton}>
             <MaterialIcons name="arrow-back" size={24} color="#7b5455" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>ลงทะเบียนยกภาค</Text>
+          <Text style={styles.headerTitle}>ลงทะเบียนยกภาค (AI)</Text>
           <TouchableOpacity onPress={fetchData}>
-             <MaterialIcons name="refresh" size={24} color="#a73355" />
+            <MaterialIcons name="refresh" size={24} color="#a73355" />
           </TouchableOpacity>
         </View>
 
         {loading ? (
           <ActivityIndicator size="large" color="#a73355" style={{ marginTop: 100 }} />
         ) : (
-          <ScrollView contentContainerStyle={styles.scrollContent}>
-            <Text style={styles.infoText}>วิชาแนะนำสำหรับสาขา {student?.major || ""}</Text>
-            
-            {courses.length === 0 ? (
-              <Text style={{textAlign: 'center', marginTop: 50, color: '#837375'}}>ไม่มีวิชาแนะนำในชั้นปีนี้</Text>
-            ) : (
-              courses.map(item => {
-                const inCart = cartCourseCodes.includes(item.course_code);
-                const selected = selectedData[item.course_code] || {};
+          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+            {suggestions.length > 0 ? (
+              <View style={styles.plansSection}>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>แผนการเรียนที่แนะนำ</Text>
+                  <TouchableOpacity onPress={() => setSuggestions([])} style={styles.resetButton}>
+                    <Text style={styles.resetText}>จัดใหม่</Text>
+                  </TouchableOpacity>
+                </View>
 
-                // ค้นหา Sec ที่มี T และ L มาแยกกัน
-                const tSecs = [];
-                const lSecs = [];
-                Object.keys(item.sections).forEach(secNum => {
-                  item.sections[secNum].forEach(slot => {
-                    if (slot.section_type === 'T' && !tSecs.includes(secNum)) tSecs.push(secNum);
-                    if (slot.section_type === 'L' && !lSecs.includes(secNum)) lSecs.push(secNum);
-                  });
-                });
-
-                return (
-                  <View key={item.course_code} style={[styles.courseCard, inCart && { opacity: 0.6 }]}>
+                {suggestions.map((plan, index) => (
+                  <View key={index} style={styles.planCard}>
+                    <Text style={styles.planTitle}>Plan {String.fromCharCode(65 + index)}</Text>
                     
-                    {/* ส่วนหัว Card: ถ้ารายวิชามีในตะกร้าจะโชว์รูปกุญแจแดง */}
-                    <TouchableOpacity style={styles.cardHeader} onPress={() => toggleCheck(item.course_code)} activeOpacity={inCart ? 1 : 0.7}>
-                      <MaterialIcons 
-                        name={inCart ? "lock" : (selected.checked ? "check-box" : "check-box-outline-blank")} 
-                        size={26} 
-                        color={inCart ? "#E53935" : (selected.checked ? "#a73355" : "#ccc")} 
-                      />
-                      <View style={{ flex: 1, marginLeft: 10 }}>
-                        <Text style={[styles.courseCode, inCart && { color: '#E53935' }]}>
-                          {item.course_code}
-                          {inCart && <Text style={{fontSize: 10, color: '#E53935'}}> (มีในตะกร้าแล้ว)</Text>}
-                        </Text>
-                        <Text style={styles.courseName}>{item.course_name}</Text>
-                      </View>
-                      <Text style={styles.credits}>{item.credits} หน่วยกิต</Text>
-                    </TouchableOpacity>
-                    
-                    {/* ส่วนเลือก Section และแสดงเวลา */}
-                    {selected.checked && !inCart && (
-                      <View style={styles.sectionContainer}>
-                        
-                        {/* เลือก ทฤษฎี (T) */}
-                        {tSecs.length > 0 && (
-                          <View style={{ marginBottom: 10 }}>
-                            <Text style={styles.secTitle}>ทฤษฎี (T):</Text>
-                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row' }}>
-                              {tSecs.map(sec => (
-                                <TouchableOpacity 
-                                  key={`T-${sec}`} 
-                                  style={[styles.secChip, selected.secT === sec && styles.secChipActive]}
-                                  onPress={() => changeSection(item.course_code, 'secT', sec)}
-                                >
-                                  <Text style={[styles.secChipText, selected.secT === sec && styles.secChipTextActive]}>Sec {sec}</Text>
-                                </TouchableOpacity>
+                    <View style={styles.gridOuterContainer}>
+                      <ScrollView horizontal={true} showsHorizontalScrollIndicator={true}>
+                        <View style={{ width: TOTAL_GRID_WIDTH + DAY_COLUMN_WIDTH + 50 }}>
+                          <View style={styles.timeHeaderRow}>
+                            <View style={{ width: DAY_COLUMN_WIDTH }} />
+                            <View style={{ flex: 1, flexDirection: "row", position: "relative" }}>
+                              {Array.from({ length: COLUMN_COUNT + 1 }, (_, i) => GRID_START_HOUR + i).map((h, i) => (
+                                <Text key={h} style={[styles.timeLabel, { position: "absolute", left: i * ONE_HOUR_WIDTH - 10, width: 20, textAlign: "center" }]}>{h}</Text>
                               ))}
-                            </ScrollView>
+                            </View>
                           </View>
-                        )}
 
-                        {/* เลือก ปฏิบัติ (L) */}
-                        {lSecs.length > 0 && (
-                          <View style={{ marginBottom: 10 }}>
-                            <Text style={styles.secTitle}>ปฏิบัติ (L):</Text>
-                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexDirection: 'row' }}>
-                              {lSecs.map(sec => (
-                                <TouchableOpacity 
-                                  key={`L-${sec}`} 
-                                  style={[styles.secChip, selected.secL === sec && styles.secChipActive]}
-                                  onPress={() => changeSection(item.course_code, 'secL', sec)}
-                                >
-                                  <Text style={[styles.secChipText, selected.secL === sec && styles.secChipTextActive]}>Sec {sec}</Text>
-                                </TouchableOpacity>
-                              ))}
-                            </ScrollView>
-                          </View>
-                        )}
-                        
-                        {/* กล่องสรุปเวลาเรียน */}
-                        <View style={styles.timeBox}>
-                          {selected.secT && item.sections[selected.secT]?.filter(s => s.section_type === 'T').map((t, i) => (
-                            <Text key={`time-T-${i}`} style={styles.timeText}>
-                              • [ทฤษฎี Sec {selected.secT}] วัน{DAY_MAP[t.day_of_week] || t.day_of_week} {t.start_time}-{t.end_time}
-                            </Text>
-                          ))}
-                          {selected.secL && item.sections[selected.secL]?.filter(s => s.section_type === 'L').map((t, i) => (
-                            <Text key={`time-L-${i}`} style={styles.timeText}>
-                              • [ปฏิบัติ Sec {selected.secL}] วัน{DAY_MAP[t.day_of_week] || t.day_of_week} {t.start_time}-{t.end_time}
-                            </Text>
+                          {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((dayKey) => (
+                            <View key={dayKey} style={styles.dayRow}>
+                              <View style={styles.dayLabelContainer}>
+                                <Text style={styles.dayTextTh}>{DAY_MAP[dayKey]}</Text>
+                              </View>
+                              <View style={[styles.gridContent, { width: TOTAL_GRID_WIDTH }]}>
+                                {Array.from({ length: COLUMN_COUNT + 1 }).map((_, i) => (
+                                  <View key={i} style={[styles.vLine, { left: i * ONE_HOUR_WIDTH }]} />
+                                ))}
+                                {plan.filter((c) => {
+                                  const d = c.day_of_week || c.class_times?.[0]?.day;
+                                  // 🌟 เทียบทั้ง Key (Mon) และชื่อเต็ม (จันทร์) ให้ตรงกับ dayKey
+                                  return d === dayKey || DAY_MAP[d] === DAY_MAP[dayKey];
+                                }).map((item, idx) => {
+                                  const t = item.class_times?.[0] || item;
+                                  const pos = getBoxStyle(t.start || item.start_time, t.end || item.end_time);
+                                  return (
+                                    <View key={idx} style={[styles.courseBox, { left: pos.left + 1, width: pos.width - 2 }]}>
+                                      <Text style={styles.boxCode} numberOfLines={1}>
+                                        {item.course_code} {item.section_type ? `(${item.section_type})` : ""}
+                                      </Text>
+                                      <Text style={styles.boxTime} numberOfLines={1}>
+                                        {formatTimeDisplay(t.start || item.start_time)}-{formatTimeDisplay(t.end || item.end_time)}
+                                      </Text>
+                                    </View>
+                                  );
+                                })}
+                              </View>
+                            </View>
                           ))}
                         </View>
-                      </View>
-                    )}
+                      </ScrollView>
+                    </View>
+
+                    <Text style={styles.sectionTitleSmall}>รายละเอียดวิชา</Text>
+                    {(() => {
+                      const groupedByDay = plan.reduce((acc, item) => {
+                        const dayKey = item.day_of_week || item.class_times?.[0]?.day;
+                        const dName = DAY_MAP[dayKey] || "ไม่ระบุ";
+                        if (!acc[dName]) acc[dName] = [];
+                        acc[dName].push(item);
+                        return acc;
+                      }, {});
+
+                      return Object.entries(groupedByDay)
+                        .sort(([dayA], [dayB]) => (DAY_ORDER[dayA] || 9) - (DAY_ORDER[dayB] || 9))
+                        .map(([dayStr, items], dIdx) => (
+                          <View key={dIdx} style={styles.dayGroupContainer}>
+                            <View style={styles.dayGroupHeader}>
+                              <Text style={styles.dayGroupTitle}>{dayStr}</Text>
+                              <Text style={styles.dayGroupCount}>{items.length} Subjects</Text>
+                            </View>
+                            <View style={styles.dayGroupBody}>
+                              {items
+                                .sort((a, b) => (a.start_time || a.class_times?.[0]?.start) - (b.start_time || b.class_times?.[0]?.start))
+                                .map((item, idx) => {
+                                const startTime = item.start_time || item.class_times?.[0]?.start;
+                                const endTime = item.end_time || item.class_times?.[0]?.end;
+                                const isLast = idx === items.length - 1;
+                                const courseInfo = courses.find(c => c.course_code === item.course_code);
+                                const secNum = String(item.section_number || "1");
+                                const secType = item.section_type || "T";
+                                const secData = courseInfo?.sections?.[secNum]?.find(s => s.section_type === secType);
+
+                                return (
+                                  <View key={idx} style={styles.timelineRow}>
+                                    <View style={styles.timelineTimeCol}>
+                                      <Text style={styles.timelineTimeText}>{formatTimeDisplay(startTime)}-{formatTimeDisplay(endTime)}</Text>
+                                    </View>
+                                    <View style={styles.timelineCenterCol}>
+                                      <View style={styles.timelineDot} />
+                                      {!isLast && <View style={styles.timelineLine} />}
+                                    </View>
+                                    <View style={styles.timelineDetailCol}>
+                                      <Text style={styles.timelineCodeText}>
+                                        {item.course_code}
+                                        <Text style={{ color: secType === "T" ? "#2E7D32" : "#C62828", fontSize: 13, fontWeight: "normal" }}>
+                                          {secType === "T" ? " (ทฤษฎี)" : " (ปฏิบัติ)"}
+                                        </Text>
+                                      </Text>
+                                      <Text style={styles.timelineNameText} numberOfLines={1}>{courseInfo?.course_name}</Text>
+                                      <Text style={styles.timelineSubText}>กลุ่ม: {secNum}</Text>
+                                      {secData && (
+                                        <Text style={[styles.metaText, { color: (secData.max_seats - secData.enrolled_seats) <= 0 ? 'red' : '#837375' }]}>
+                                          ที่นั่ง: {secData.enrolled_seats}/{secData.max_seats} (ว่าง {secData.max_seats - secData.enrolled_seats})
+                                        </Text>
+                                      )}
+                                    </View>
+                                  </View>
+                                );
+                              })}
+                            </View>
+                          </View>
+                        ));
+                    })()}
+
+                    <TouchableOpacity style={styles.acceptBtn} onPress={() => handleAcceptPlan(plan)}>
+                      <LinearGradient colors={['#D23669', '#a73355']} style={styles.acceptGradient}>
+                        <Text style={styles.acceptBtnText}>เลือกแผนนี้ลงตะกร้า</Text>
+                      </LinearGradient>
+                    </TouchableOpacity>
                   </View>
-                );
-              })
+                ))}
+              </View>
+            ) : (
+              <View>
+                <Text style={styles.infoText}>เลือกวิชาบังคับ/แนะนำ เพื่อให้ AI จัดแผนให้</Text>
+                {courses.map(item => {
+                  const inCart = cartCourseCodes.includes(item.course_code);
+                  const inSchedule = enrolledCourseCodes.includes(item.course_code);
+                  const isLocked = inCart || inSchedule;
+                  const isSelected = selectedCodes.includes(item.course_code);
+
+                  return (
+                    <TouchableOpacity 
+                      key={item.course_code} 
+                      style={[styles.courseCard, isSelected && styles.courseCardSelected, isLocked && styles.courseCardLocked]}
+                      onPress={() => toggleCourse(item.course_code)}
+                      disabled={isLocked}
+                    >
+                      <View style={styles.cardHeader}>
+                        <MaterialIcons 
+                          name={isLocked ? "lock" : (isSelected ? "check-box" : "check-box-outline-blank")} 
+                          size={24} 
+                          color={isLocked ? "#E53935" : (isSelected ? "#FFF" : "#a73355")} 
+                        />
+                        <View style={{ flex: 1, marginLeft: 10 }}>
+                          <Text style={[styles.courseCode, (isSelected || isLocked) && { color: isLocked ? '#E53935' : '#FFF' }]}>
+                            {item.course_code}
+                            {inCart && " (ในตะกร้า)"}
+                            {inSchedule && " (ในตาราง)"}
+                          </Text>
+                          <Text style={[styles.courseName, isSelected && { color: '#FFDAE4' }]}>{item.course_name}</Text>
+                        </View>
+                        <Text style={[styles.credits, isSelected && { color: '#FFF' }]}>{item.credits} นก.</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+
+                <TouchableOpacity style={styles.generateBtn} onPress={handleGeneratePlans} disabled={calculating}>
+                  <LinearGradient colors={['#a73355', '#7b1d3a']} style={styles.generateGradient}>
+                    {calculating ? <ActivityIndicator color="white" /> : (
+                      <><MaterialIcons name="auto-awesome" size={20} color="white" style={{ marginRight: 8 }} />
+                      <Text style={styles.generateBtnText}>สร้างแผนการเรียนอัตโนมัติ</Text></>
+                    )}
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
             )}
           </ScrollView>
         )}
-
-        <View style={styles.bottomArea}>
-          <TouchableOpacity style={styles.confirmBtn} onPress={handleRegister} disabled={isSubmitting}>
-            <LinearGradient colors={['#a73355', '#7b1d3a']} style={styles.confirmGradient}>
-              {isSubmitting ? (
-                <ActivityIndicator color="white" />
-              ) : (
-                <>
-                  <Feather name="plus-circle" size={20} color="white" style={{ marginRight: 8 }} />
-                  <Text style={styles.confirmBtnText}>เพิ่มวิชาทั้งหมดลงตะกร้า</Text>
-                </>
-              )}
-            </LinearGradient>
-          </TouchableOpacity>
-        </View>
-
-        {/* 🚨 MODAL เตือนตารางชน 🚨 */}
-        <Modal visible={!!conflictData} transparent animationType="fade">
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <View style={styles.modalIconContainer}>
-                <View style={styles.modalIconCircle}>
-                  <MaterialIcons name="event-busy" size={40} color="#FFF" />
-                </View>
-              </View>
-              <Text style={styles.modalTitle}>ตรวจพบเวลาเรียนชนกัน!</Text>
-              <Text style={styles.modalDesc}>กรุณาตรวจสอบและแก้ไข Section ด้านล่างนี้</Text>
-              
-              <ScrollView style={{ width: '100%', maxHeight: 250 }}>
-                {conflictData?.map((c, i) => (
-                  <View key={i} style={styles.conflictCard}>
-                    <Text style={styles.conflictCourse}>{c.course_code} ({c.section_type === 'T' ? 'ทฤษฎี' : 'ปฏิบัติ'} Sec {c.requested_section})</Text>
-                    <Text style={styles.conflictSubtitle}>ชนกับวิชาในตะกร้า</Text>
-                    
-                    {c.suggested_section ? (
-                      <TouchableOpacity style={styles.suggestBtn} onPress={() => resolveConflict(c.course_code, c.section_type, c.suggested_section)}>
-                        <MaterialIcons name="autorenew" size={16} color="white" style={{marginRight:5}}/>
-                        <Text style={{ color: '#fff', fontSize: 13, fontWeight: 'bold' }}>เปลี่ยนเป็น Sec {c.suggested_section} ที่ไม่ชน</Text>
-                      </TouchableOpacity>
-                    ) : (
-                      <TouchableOpacity style={styles.removeBtn} onPress={() => resolveConflict(c.course_code, c.section_type, null)}>
-                        <MaterialIcons name="delete" size={16} color="white" style={{marginRight:5}}/>
-                        <Text style={{ color: '#fff', fontSize: 13, fontWeight: 'bold' }}>ยกเลิกการลงวิชานี้ (ไม่มี Sec ว่าง)</Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                ))}
-              </ScrollView>
-
-              <TouchableOpacity style={{ marginTop: 20 }} onPress={() => setConflictData(null)}>
-                <Text style={{ color: '#837375', fontWeight: 'bold' }}>ปิดหน้าต่าง</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
-
       </SafeAreaView>
     </LinearGradient>
   );
@@ -303,43 +373,62 @@ export default function RegistrationScreen({ student, setView }) {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20 },
-  headerTitle: { fontSize: 20, fontWeight: '900', color: '#7b5455' },
+  headerTitle: { fontSize: 18, fontWeight: '900', color: '#7b5455' },
   backButton: { padding: 8, backgroundColor: 'white', borderRadius: 12 },
-  scrollContent: { paddingHorizontal: 16, paddingBottom: 120 },
+  scrollContent: { paddingHorizontal: 16, paddingBottom: 100 },
   infoText: { fontSize: 14, color: '#837375', marginBottom: 15, fontWeight: 'bold' },
   
-  courseCard: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 12, elevation: 2 },
+  courseCard: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 10, elevation: 1, borderWidth: 1, borderColor: '#FDEEF4' },
+  courseCardSelected: { backgroundColor: '#a73355', borderColor: '#a73355' },
+  courseCardLocked: { backgroundColor: '#F5F5F5', opacity: 0.7 },
   cardHeader: { flexDirection: 'row', alignItems: 'center' },
   courseCode: { fontSize: 16, fontWeight: 'bold', color: '#1f1a1c' },
   courseName: { fontSize: 12, color: '#837375', marginTop: 2 },
-  credits: { fontSize: 14, fontWeight: 'bold', color: '#a73355' },
-  
-  sectionContainer: { marginTop: 15, paddingTop: 15, borderTopWidth: 1, borderTopColor: '#f0f0f0' },
-  secTitle: { fontSize: 12, fontWeight: 'bold', color: '#514345', marginBottom: 5 },
-  secChip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: '#f5f5f5', marginRight: 8, borderWidth: 1, borderColor: '#e0e0e0' },
-  secChipActive: { backgroundColor: '#FDEEF4', borderColor: '#a73355' },
-  secChipText: { fontSize: 12, color: '#837375', fontWeight: 'bold' },
-  secChipTextActive: { color: '#a73355' },
-  
-  timeBox: { backgroundColor: '#F9F9F9', padding: 10, borderRadius: 8 },
-  timeText: { fontSize: 12, color: '#514345', marginBottom: 4, fontWeight: 'bold' },
+  credits: { fontSize: 13, fontWeight: 'bold', color: '#a73355' },
 
-  bottomArea: { position: 'absolute', bottom: 0, width: '100%', backgroundColor: 'white', padding: 20, borderTopLeftRadius: 30, borderTopRightRadius: 30, elevation: 20 },
-  confirmBtn: { borderRadius: 16, overflow: 'hidden' },
-  confirmGradient: { paddingVertical: 18, justifyContent: 'center', alignItems: 'center', flexDirection: 'row' },
-  confirmBtnText: { color: 'white', fontSize: 16, fontWeight: 'bold' },
+  generateBtn: { marginTop: 10, borderRadius: 16, overflow: 'hidden' },
+  generateGradient: { paddingVertical: 18, justifyContent: 'center', alignItems: 'center', flexDirection: 'row' },
+  generateBtnText: { color: 'white', fontSize: 16, fontWeight: 'bold' },
 
-  // MODAL STYLES
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalContent: { backgroundColor: 'white', borderRadius: 24, padding: 24, width: '100%', alignItems: 'center' },
-  modalIconContainer: { marginTop: -50, marginBottom: 10 },
-  modalIconCircle: { width: 70, height: 70, borderRadius: 35, backgroundColor: '#E53935', justifyContent: 'center', alignItems: 'center', elevation: 5 },
-  modalTitle: { fontSize: 18, fontWeight: '900', color: '#1f1a1c', marginBottom: 5 },
-  modalDesc: { fontSize: 13, color: '#837375', marginBottom: 20 },
-  
-  conflictCard: { backgroundColor: '#FFF5F5', padding: 15, borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: '#FFCDD2' },
-  conflictCourse: { fontSize: 15, fontWeight: 'bold', color: '#B71C1C' },
-  conflictSubtitle: { fontSize: 12, color: '#E53935', marginBottom: 10 },
-  suggestBtn: { flexDirection: 'row', backgroundColor: '#4CAF50', padding: 12, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
-  removeBtn: { flexDirection: 'row', backgroundColor: '#757575', padding: 12, borderRadius: 8, justifyContent: 'center', alignItems: 'center' }
+  plansSection: { marginBottom: 32 },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  sectionTitle: { fontSize: 18, fontWeight: "900", color: "#1f1a1c" },
+  sectionTitleSmall: { fontSize: 16, fontWeight: "bold", color: "#514345", marginBottom: 12 },
+  resetText: { fontSize: 12, color: "#a73355", fontWeight: "bold" },
+
+  planCard: { backgroundColor: "white", borderRadius: 25, padding: 15, marginBottom: 30, elevation: 5 },
+  planTitle: { fontSize: 20, fontWeight: "bold", color: "#1f1a1c", marginBottom: 15 },
+
+  gridOuterContainer: { backgroundColor: "#FFFFFF", borderRadius: 12, paddingVertical: 10, marginBottom: 20, borderWidth: 1, borderColor: "#F0F0F0" },
+  timeHeaderRow: { flexDirection: "row", height: 24, alignItems: "center" },
+  timeLabel: { fontSize: 9, color: "#A0A0A0", fontWeight: "500" },
+  dayRow: { flexDirection: "row", height: 35, borderBottomWidth: 1, borderBottomColor: "#F5F5F5" },
+  dayLabelContainer: { width: DAY_COLUMN_WIDTH, justifyContent: "center", alignItems: "center", backgroundColor: "#FFFBFB", borderRightWidth: 1, borderRightColor: "#F5F5F5" },
+  dayTextTh: { fontSize: 9, fontWeight: "bold", color: "#514345" },
+  gridContent: { position: "relative" },
+  vLine: { position: "absolute", top: 0, bottom: 0, width: 1, backgroundColor: "#F5F5F5" },
+  courseBox: { position: "absolute", top: 2, bottom: 2, backgroundColor: "#FFAEB5", borderRadius: 4, justifyContent: "center", alignItems: "center" },
+  boxCode: { fontSize: 7, fontWeight: "bold", color: "#333333" },
+  boxTime: { fontSize: 6, color: "#666666", marginTop: 1 },
+
+  dayGroupContainer: { backgroundColor: "#FFFFFF", marginBottom: 20, borderRadius: 16, overflow: "hidden", borderWidth: 1, borderColor: "#FDEEF4", elevation: 2 },
+  dayGroupHeader: { backgroundColor: "#a73355", flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 15, paddingVertical: 10 },
+  dayGroupTitle: { fontSize: 16, fontWeight: "900", color: "#FFFFFF" },
+  dayGroupCount: { fontSize: 11, fontWeight: "600", color: "#FFDAE4" },
+  dayGroupBody: { paddingTop: 12, paddingBottom: 8 },
+  timelineRow: { flexDirection: "row", marginBottom: 12 },
+  timelineTimeCol: { width: 70, paddingLeft: 10, alignItems: "flex-end" },
+  timelineTimeText: { fontSize: 11, fontWeight: "600", color: "#837375" },
+  timelineCenterCol: { width: 25, alignItems: "center", position: "relative" },
+  timelineDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#D23669", zIndex: 2 },
+  timelineLine: { position: "absolute", top: 6, bottom: -18, width: 2, backgroundColor: "#FDEEF4", zIndex: 1 },
+  timelineDetailCol: { flex: 1, paddingRight: 10 },
+  timelineCodeText: { fontSize: 14, fontWeight: "600", color: "#1f1a1c", marginBottom: 4 },
+  timelineNameText: { fontSize: 12, color: "#514345", marginBottom: 2 },
+  timelineSubText: { fontSize: 11, color: "#837375" },
+  metaText: { fontSize: 11, fontWeight: "bold", marginTop: 2 },
+
+  acceptBtn: { marginTop: 10, borderRadius: 20, overflow: "hidden" },
+  acceptGradient: { paddingVertical: 12, alignItems: 'center' },
+  acceptBtnText: { color: 'white', fontWeight: 'bold', fontSize: 14 }
 });

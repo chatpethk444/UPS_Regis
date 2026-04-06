@@ -25,6 +25,8 @@ class Student(Base):
     curriculum_year = Column(String(4))
     study_plan = Column(String(50))
     avatar_url = Column(String(255))
+    current_year = Column(Integer)
+    current_semester = Column(Integer,default=1)
     
 #  password_hash = Column(String(255))  # 🔒 เพิ่มสำหรับระบบ Password ในอนาคต
 
@@ -113,6 +115,8 @@ class StudyGroup(Base):
     leader_id = Column(String(20), ForeignKey('student.student_id', ondelete="CASCADE")) # หัวหน้ากลุ่ม
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     last_synced_at = Column(DateTime, nullable=True)
+    is_registered = Column(Boolean, default=False)
+    last_action = Column(String(100), nullable=True)
 
 class GroupMember(Base):
     __tablename__ = 'group_member'
@@ -122,6 +126,8 @@ class GroupMember(Base):
     status = Column(String(20), default="PENDING") # 🌟 สถานะ: PENDING, APPROVED
     joined_at = Column(DateTime, default=datetime.datetime.utcnow)
     is_ready = Column(Boolean, default=False)
+    last_notified_action = Column(String(100), nullable=True)
+    has_seen_registered_alert = Column(Boolean, default=False)
 
 
 

@@ -605,13 +605,15 @@ export default function ScheduleScreen({ student, setView }) {
             <MaterialIcons name="home" size={24} color="#837375" />
             <Text style={styles.navText}>HOME</Text>
           </TouchableOpacity>
+
           <TouchableOpacity
             style={styles.navItem}
             onPress={() => setView("MANUAL")}
           >
-            <MaterialIcons name="search" size={24} color="#837375" />
-            <Text style={styles.navText}>SEARCH</Text>
+            <MaterialIcons name="list" size={24} color="#837375" />
+            <Text style={styles.navText}>COURSES</Text>
           </TouchableOpacity>
+
           <TouchableOpacity
             style={styles.navItem}
             onPress={() => setView("CART")}

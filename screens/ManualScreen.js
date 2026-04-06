@@ -3,7 +3,6 @@ import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   FlatList,
   Alert,
@@ -11,7 +10,7 @@ import {
   SafeAreaView,
   StyleSheet,
 } from "react-native";
-import { MaterialIcons, Feather } from "@expo/vector-icons";
+import { MaterialIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import {
   getAvailableCoursesAPI,
@@ -19,7 +18,7 @@ import {
   addToCartAPI,
   getCartAPI,
   getZOptionsAPI,
-  getScheduleAPI
+  getScheduleAPI,
 } from "../api";
 
 // ✅ แยก api.js ให้รับ section_type ด้วย
@@ -46,10 +45,8 @@ async function addToCartWithType(
 }
 
 export default function ManualScreen({ student, setView }) {
-  const [searchQuery, setSearchQuery] = useState("");
-  const [isSearched, setIsSearched] = useState(false);
   const [courses, setCourses] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true); // เริ่มมาให้หมุนโหลดเลย
   const [selectedCourse, setSelectedCourse] = useState(null);
   const [sections, setSections] = useState([]);
   const [cart, setCart] = useState([]);
@@ -57,20 +54,45 @@ export default function ManualScreen({ student, setView }) {
   const [schedule, setSchedule] = useState([]);
 
   useEffect(() => {
-    fetchUserData();
+    fetchInitialData();
   }, []);
 
-  // ✅ ดึงข้อมูลตะกร้าและตารางเรียนมาพร้อมกัน
-  const fetchUserData = async () => {
+  // ✅ ดึงข้อมูลทุกอย่างมาพร้อมกันตอนเปิดหน้า (ตะกร้า, ตาราง, รายวิชาทั้งหมด)
+  // ✅ ดึงข้อมูลทุกอย่างมาพร้อมกันตอนเปิดหน้า (ตะกร้า, ตาราง, รายวิชาทั้งหมด)
+  const fetchInitialData = async () => {
+    setLoading(true);
     try {
-      const [cartData, scheduleData] = await Promise.all([
+      const [cartData, scheduleData, allCoursesData] = await Promise.all([
         getCartAPI(student.student_id).catch(() => []),
-        getScheduleAPI(student.student_id).catch(() => [])
+        getScheduleAPI(student.student_id).catch(() => []),
+        getAvailableCoursesAPI(student.student_id).catch(() => [])
       ]);
+
       setCart(cartData);
       setSchedule(scheduleData);
+
+      // 📌 กรองวิชาตามเงื่อนไข (หน้าแรก)
+      const filteredCourses = allCoursesData.filter((c) => {
+        if (c.suggested_semester != student.current_semester) return false;
+
+        const courseGroup = c.course_group ? c.course_group.toLowerCase() : "";
+        const isFreeElective = courseGroup.includes("เลือกเสรี") || courseGroup.includes("free elective");
+        
+        if (isFreeElective) {
+          const major = student.major || ""; 
+          // 🌟 เช็กจากชื่อสาขาภาษาไทยตาม Log
+          if (major.includes("วิศวกรรมคอมพิวเตอร์") && c.course_code.startsWith("CPE")) return false;
+          if (major.includes("เทคโนโลยีสารสนเทศ") && c.course_code.startsWith("ICT")) return false;
+          if (major.includes("โลจิสติกส์") && c.course_code.startsWith("LSM")) return false;
+        }
+        return true; 
+      });
+
+      setCourses(filteredCourses);
     } catch (err) {
-      console.error("Fetch User Data Error:", err);
+      Alert.alert("ข้อผิดพลาด", "ไม่สามารถดึงข้อมูลรายวิชาได้");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -85,44 +107,6 @@ export default function ManualScreen({ student, setView }) {
     return s1 < e2 && s2 < e1;
   };
 
-  const handleSearch = async () => {
-    if (!searchQuery.trim()) {
-      return Alert.alert("⚠️ แจ้งเตือน", "กรุณากรอกรหัสวิชาหรือชื่อวิชา");
-    }
-    setLoading(true);
-    try {
-      const data = await getAvailableCoursesAPI(student.student_id);
-      const q = searchQuery.toLowerCase();
-      
-      const filtered = data.filter(
-        (c) =>
-          // 1. เช็กว่าคำค้นหาตรงกับรหัสหรือชื่อวิชา
-          (c.course_code.toLowerCase().includes(q) ||
-           c.course_name.toLowerCase().includes(q)) 
-          && 
-          // ✅ 2. เปลี่ยนมาใช้ c.suggested_semester ให้ตรงกับ API
-          (c.suggested_semester == student.current_semester) 
-      );
-      
-      setCourses(filtered);
-      setIsSearched(true);
-      setSelectedCourse(null); 
-      setSections([]);
-      setZOptions(null);
-
-      if (filtered.length === 0)
-        Alert.alert("ไม่พบวิชา", `ไม่มีวิชาที่ตรงกับการค้นหาในเทอม ${student.current_semester} ครับ`);
-    } catch (err) {
-      Alert.alert("Error", err.message);
-    } finally {
-      setLoading(false);
-    }
-
-    const data = await getAvailableCoursesAPI(student.student_id);
-    console.log("ตัวอย่างข้อมูลวิชาที่ Backend ส่งมา:", data[0]); // ดูที่ Terminal
-  };
-
-  // ✅ แก้ไข: เพิ่มระบบ Toggle ถ้ากดวิชาเดิมซ้ำให้พับเก็บ
   const handleSelectCourse = async (course) => {
     if (selectedCourse?.course_code === course.course_code) {
       setSelectedCourse(null);
@@ -139,7 +123,22 @@ export default function ManualScreen({ student, setView }) {
           student.student_id,
           course.course_code,
         );
-        setZOptions(options);
+
+        // 📌 กรองวิชาสาขาตัวเองออกจากหมวดวิชาเลือกเสรี Z
+        const major = student.major || ""; 
+        const filteredOptions = options.filter((opt) => {
+          if (major.includes("วิศวกรรมคอมพิวเตอร์") && opt.course_code.startsWith("CPE")) return false;
+          if (major.includes("เทคโนโลยีสารสนเทศ") && opt.course_code.startsWith("ICT")) return false;
+          if (major.includes("โลจิสติกส์") && opt.course_code.startsWith("LSM")) return false;
+          return true;
+        });
+
+        // กำจัดวิชาที่ซ้ำกัน (ป้องกัน Error children with the same key)
+        const uniqueOptions = Array.from(
+          new Map(filteredOptions.map((opt) => [opt.course_code, opt])).values()
+        );
+
+        setZOptions(uniqueOptions);
         setSections([]);
       } else {
         const data = await getSectionsAPI(course.course_code);
@@ -153,15 +152,16 @@ export default function ManualScreen({ student, setView }) {
     }
   };
 
-  // ✅ แก้ไข: รับ parameter targetCourse เข้ามาด้วย เพื่อรองรับวิชา Z ที่รหัสวิชาลูกจะไม่เหมือนวิชาแม่
-  // ✅ 1. เพิ่ม parameter computedType เข้ามา
   const handleAddSection = async (targetCourse, section, computedType) => {
-    const sectionType = computedType || "T"; 
+    const sectionType = computedType || "T";
 
-    if (targetCourse.required_semester && student.current_semester < targetCourse.required_semester) {
+    if (
+      targetCourse.required_semester &&
+      student.current_semester < targetCourse.required_semester
+    ) {
       Alert.alert(
-        "⚠️ คำเตือน", 
-        `วิชานี้แนะนำสำหรับนักศึกษาเทอม ${targetCourse.required_semester} (คุณอยู่เทอม ${student.current_semester})`
+        "⚠️ คำเตือน",
+        `วิชานี้แนะนำสำหรับนักศึกษาเทอม ${targetCourse.required_semester} (คุณอยู่เทอม ${student.current_semester})`,
       );
     }
 
@@ -172,54 +172,52 @@ export default function ManualScreen({ student, setView }) {
       );
     }
 
-    // 🌟 รวมวิชาในตะกร้าและในตารางเรียนเข้าด้วยกันเพื่อเช็กทีเดียว
     const allRegistered = [...cart, ...schedule];
 
-    // ✅ 1. เช็กว่าในตารางเรียน (Schedule) มีประเภทนี้หรือยัง?
     const alreadyInSchedule = schedule.find(
-      (i) => i.course_code === targetCourse.course_code && (i.section_type === sectionType || i.type === sectionType)
+      (i) =>
+        i.course_code === targetCourse.course_code &&
+        (i.section_type === sectionType || i.type === sectionType),
     );
     if (alreadyInSchedule) {
       const typeLabel = sectionType === "T" ? "ทฤษฎี (T)" : "ปฏิบัติ (L)";
       return Alert.alert(
         "❌ ไม่สามารถเพิ่มได้",
-        `คุณได้ลงทะเบียนวิชา ${targetCourse.course_code} ${typeLabel} ไปเรียบร้อยแล้วในตารางเรียน`
+        `คุณได้ลงทะเบียนวิชา ${targetCourse.course_code} ${typeLabel} ไปเรียบร้อยแล้วในตารางเรียน`,
       );
     }
 
-    // ✅ 2. เช็กว่าในตะกร้า (Cart) มีประเภทนี้หรือยัง?
     const alreadyInCart = cart.find(
-      (i) => i.course_code === targetCourse.course_code && i.section_type === sectionType
+      (i) =>
+        i.course_code === targetCourse.course_code &&
+        i.section_type === sectionType,
     );
     if (alreadyInCart) {
       const typeLabel = sectionType === "T" ? "ทฤษฎี (T)" : "ปฏิบัติ (L)";
       return Alert.alert(
         "❌ ไม่สามารถเพิ่มได้",
-        `วิชา ${targetCourse.course_code} ${typeLabel} มีอยู่ในตะกร้าของคุณแล้ว (Sec ${alreadyInCart.section_number})\nหากต้องการเปลี่ยนกลุ่ม กรุณาลบออกจากตะกร้าก่อน`
+        `วิชา ${targetCourse.course_code} ${typeLabel} มีอยู่ในตะกร้าของคุณแล้ว (Sec ${alreadyInCart.section_number})\nหากต้องการเปลี่ยนกลุ่ม กรุณาลบออกจากตะกร้าก่อน`,
       );
     }
 
-    // ✅ 3. เช็กว่าเวลาเรียนชนกันหรือไม่
     const conflict = allRegistered.find((i) => isTimeOverlapping(i, section));
-    
+
     if (conflict) {
-      const location = cart.some(c => c.course_code === conflict.course_code) 
-        ? "ตะกร้า" 
+      const location = cart.some((c) => c.course_code === conflict.course_code)
+        ? "ตะกร้า"
         : "ตารางเรียน";
 
-      // 🌟 แก้ไขตรงนี้: ดึงค่าประเภทให้คลุมทั้งกรณี section_type และ type
-      const conflictType = conflict.section_type || conflict.type; 
+      const conflictType = conflict.section_type || conflict.type;
       let typeLabel = "";
       if (conflictType === "T") typeLabel = "(ทฤษฎี)";
       else if (conflictType === "L") typeLabel = "(ปฏิบัติ)";
 
       return Alert.alert(
         "⚠️ เวลาเรียนชนกัน!",
-        `Sec ที่คุณเลือก มีเวลาทับซ้อนกับวิชา:\n${conflict.course_code} Sec ${conflict.section_number} ${typeLabel}\nซึ่งอยู่ใน "${location}" ของคุณแล้ว`
+        `Sec ที่คุณเลือก มีเวลาทับซ้อนกับวิชา:\n${conflict.course_code} Sec ${conflict.section_number} ${typeLabel}\nซึ่งอยู่ใน "${location}" ของคุณแล้ว`,
       );
     }
 
-    // ถ้าผ่านด่านทั้งหมด ก็ทำการแอดลงตะกร้าได้ปกติ
     try {
       await addToCartWithType(
         student.student_id,
@@ -232,29 +230,35 @@ export default function ManualScreen({ student, setView }) {
         "✅ สำเร็จ",
         `เพิ่ม Sec ${section.section_number} ${typeLabel} ลงตะกร้าแล้ว`,
       );
-      fetchUserData(); // ✅ โหลดข้อมูลใหม่เพื่ออัปเดต state ทันที
+      // โหลดเฉพาะตะกร้ากับตารางเรียนใหม่พอ ไม่ต้องโหลดวิชาทั้งหมดใหม่
+      const [newCart, newSchedule] = await Promise.all([
+        getCartAPI(student.student_id).catch(() => []),
+        getScheduleAPI(student.student_id).catch(() => []),
+      ]);
+      setCart(newCart);
+      setSchedule(newSchedule);
     } catch (err) {
       Alert.alert("❌ ไม่สำเร็จ", err.message);
     }
   };
 
-  // ✅ นำ UI ที่คุณเขียนไว้กลับมาใช้งานจริง
-  // ✅ 2. นำฟังก์ชันนี้ไปทับ renderSectionItem เดิม
   const renderSectionItem = (course, sec, index) => {
     const isFull = sec.enrolled_seats >= sec.max_seats;
-    
-    // 🌟 ระบบ Auto-Detect T / L (เผื่อ Backend ส่งมาไม่ครบ)
+
     const isZCourse = course.course_code.startsWith("Z");
-    const isLab = 
-      sec.type === "L" || 
-      (sec.room && sec.room.toLowerCase().includes("lab")) || 
-      (isZCourse && index === 1); // วิชาหมวด Z คาบที่ 2 บังคับเป็น Lab
+    const isLab =
+      sec.type === "L" ||
+      (sec.room && sec.room.toLowerCase().includes("lab")) ||
+      (isZCourse && index === 1);
 
     const isT = !isLab;
-    const displayType = isT ? "T" : "L"; // ตัวแปรนี้จะถูกส่งไปตอนกดเลือก
+    const displayType = isT ? "T" : "L";
 
     return (
-      <View key={`sec-${sec.section_number}-${index}`} style={styles.sectionCard}>
+      <View
+        key={`sec-${sec.section_number}-${index}`}
+        style={styles.sectionCard}
+      >
         <View style={styles.sectionInfo}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionNumText}>Sec {sec.section_number}</Text>
@@ -292,8 +296,7 @@ export default function ManualScreen({ student, setView }) {
             isFull && styles.addBtnDisabled,
           ]}
           disabled={isFull}
-          // 🌟 ส่ง displayType (T หรือ L) พ่วงไปให้ handleAddSection ด้วย
-          onPress={() => handleAddSection(course, sec, displayType)} 
+          onPress={() => handleAddSection(course, sec, displayType)}
         >
           <Text style={styles.addBtnText}>เลือก</Text>
         </TouchableOpacity>
@@ -318,62 +321,23 @@ export default function ManualScreen({ student, setView }) {
               <MaterialIcons name="arrow-back" size={24} color="#7b5455" />
             </TouchableOpacity>
             <View>
-              <Text style={styles.headerTitle}>ค้นหาวิชาเรียน</Text>
-              {/* ✅ เพิ่มการแสดงผล เทอมปัจจุบัน ตรงนี้
-              <Text style={{ fontSize: 13, color: "#837375", marginTop: 2 }}>
-                เทอมปัจจุบันของคุณ: {student?.current_semester || "ไม่ระบุ"}
-              </Text> */}
+              <Text style={styles.headerTitle}>รายวิชาที่เปิดสอน</Text>
             </View>
           </View>
-          <TouchableOpacity style={styles.bellButton}>
-            <MaterialIcons name="filter-list" size={24} color="#514345" />
-          </TouchableOpacity>
         </View>
 
         <View style={styles.content}>
-          <View style={styles.searchContainer}>
-            <View style={styles.searchInputWrapper}>
-              <Feather
-                name="search"
-                size={18}
-                color="#a73355"
-                style={styles.searchIcon}
-              />
-              <TextInput
-                style={styles.searchInput}
-                placeholder="รหัสวิชา หรือ ชื่อวิชา..."
-                placeholderTextColor="#837375"
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                onSubmitEditing={handleSearch}
-                returnKeyType="search"
-              />
-            </View>
-            <TouchableOpacity style={styles.searchBtn} onPress={handleSearch}>
-              <LinearGradient
-                colors={["#D23669", "#D23669"]}
-                style={styles.searchBtnGradient}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <Text style={styles.searchBtnText}>ค้นหา</Text>
-                )}
-              </LinearGradient>
-            </TouchableOpacity>
-          </View>
-
-          {!isSearched ? (
-            <View style={styles.emptyState}>
-              <View style={styles.emptyIconCircle}>
-                <MaterialIcons
-                  name="search"
-                  size={40}
-                  color="rgba(167,51,85,0.3)"
-                />
-              </View>
-              <Text style={styles.emptyText}>
-                พิมพ์รหัสวิชาเพื่อเริ่มจัดตารางเรียน
+          {loading && courses.length === 0 ? (
+            <View
+              style={{
+                flex: 1,
+                justifyContent: "center",
+                alignItems: "center",
+              }}
+            >
+              <ActivityIndicator size="large" color="#a73355" />
+              <Text style={{ marginTop: 10, color: "#837375" }}>
+                กำลังโหลดรายวิชา...
               </Text>
             </View>
           ) : (
@@ -381,7 +345,7 @@ export default function ManualScreen({ student, setView }) {
               data={courses}
               keyExtractor={(item) => item.course_code}
               showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ paddingBottom: 120 }}
+              contentContainerStyle={{ paddingBottom: 120, paddingTop: 10 }}
               renderItem={({ item }) => (
                 <View style={styles.courseWrapper}>
                   <TouchableOpacity
@@ -393,8 +357,9 @@ export default function ManualScreen({ student, setView }) {
                     ]}
                     activeOpacity={0.9}
                   >
-                    {/* ✅ แก้ไข: ใส่ { flex: 1 } กันข้อความชื่อวิชาชนกับไอคอนลูกศร */}
-                    <View style={[styles.courseInfo, { flex: 1, paddingRight: 10 }]}>
+                    <View
+                      style={[styles.courseInfo, { flex: 1, paddingRight: 10 }]}
+                    >
                       <View style={styles.codeBadge}>
                         <Text style={styles.codeText}>{item.course_code}</Text>
                       </View>
@@ -416,14 +381,8 @@ export default function ManualScreen({ student, setView }) {
                     />
                   </TouchableOpacity>
 
-                  {/* ✅ แก้ไข: เช็กให้แสดงผลแค่เฉพาะวิชาที่กดเลือกเท่านั้น */}
                   {selectedCourse?.course_code === item.course_code && (
                     <View style={styles.bottomSheet}>
-                      <View style={styles.sheetHeader}>
-                
-
-                      </View>
-
                       {loading ? (
                         <ActivityIndicator
                           size="large"
@@ -436,7 +395,6 @@ export default function ManualScreen({ student, setView }) {
                           keyExtractor={(zItem) => zItem.course_code}
                           renderItem={({ item: zCourse }) => (
                             <View style={{ marginBottom: 16 }}>
-                              {/* ✅ แก้ไข: กันชื่อวิชาซ้อนกันในรายวิชา Z */}
                               <Text
                                 style={{
                                   fontWeight: "bold",
@@ -447,25 +405,24 @@ export default function ManualScreen({ student, setView }) {
                                 }}
                               >
                                 {zCourse.course_code} {zCourse.course_name}
-                                
                               </Text>
-                              {zCourse.sections.map((sec, index) => 
-                                renderSectionItem(zCourse, sec, index)
-                                  
-                                
+                              {zCourse.sections.map((sec, index) =>
+                                renderSectionItem(zCourse, sec, index),
                               )}
                             </View>
                           )}
-                          contentContainerStyle={{ paddingBottom: 100 }}
+                          contentContainerStyle={{ paddingBottom: 20 }}
                         />
                       ) : (
                         <FlatList
                           data={sections}
-                          keyExtractor={(secItem, index) => `sec-${secItem.section_number}-${index}`}
-                          renderItem={({ item: secItem, index }) => 
+                          keyExtractor={(secItem, index) =>
+                            `sec-${secItem.section_number}-${index}`
+                          }
+                          renderItem={({ item: secItem, index }) =>
                             renderSectionItem(selectedCourse, secItem, index)
                           }
-                          contentContainerStyle={{ paddingBottom: 100 }}
+                          contentContainerStyle={{ paddingBottom: 20 }}
                         />
                       )}
                     </View>
@@ -485,8 +442,8 @@ export default function ManualScreen({ student, setView }) {
             <Text style={styles.navText}>HOME</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.navItemActive}>
-            <MaterialIcons name="search" size={24} color="#a73355" />
-            <Text style={styles.navTextActive}>SEARCH</Text>
+            <MaterialIcons name="list" size={24} color="#a73355" />
+            <Text style={styles.navTextActive}>COURSES</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.navItem}
@@ -507,7 +464,6 @@ export default function ManualScreen({ student, setView }) {
     </LinearGradient>
   );
 }
-
 // ... Styles คงไว้เหมือนเดิมได้เลยครับ ...
 
 const styles = StyleSheet.create({

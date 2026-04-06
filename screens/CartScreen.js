@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from "react";
 import {
   View,
@@ -300,7 +299,9 @@ export default function CartScreen({ student, setView }) {
 
     // 🌟 0. เช็คที่นั่งเต็มก่อน
     const fullItems = items.filter(
-      (item) => (item.max_seats || 0) > 0 && (item.enrolled_seats || 0) >= (item.max_seats || 0),
+      (item) =>
+        (item.max_seats || 0) > 0 &&
+        (item.enrolled_seats || 0) >= (item.max_seats || 0),
     );
 
     if (fullItems.length > 0) {
@@ -503,81 +504,114 @@ export default function CartScreen({ student, setView }) {
               </View>
 
               {/* Course Detail List */}
-<Text style={styles.sectionTitle}>รายละเอียดวิชา</Text>
-{items.map((item, idx) => {
-  const dayStr = item.day_of_week || "";
-  const startTime = item.start_time ? item.start_time.substring(0, 5) : "";
-  const endTime = item.end_time ? item.end_time.substring(0, 5) : "";
+              <Text style={styles.sectionTitle}>รายละเอียดวิชา</Text>
+              {items.map((item, idx) => {
+                const dayStr = item.day_of_week || "";
+                const startTime = item.start_time
+                  ? item.start_time.substring(0, 5)
+                  : "";
+                const endTime = item.end_time
+                  ? item.end_time.substring(0, 5)
+                  : "";
 
-  // 🌟 ดึงค่าจาก API: max_seats (ทั้งหมด) และ enrolled_seats (ลงแล้ว)
-  const maxSeats = item.max_seats || 0;
-  const enrolledSeats = item.enrolled_seats || 0;
-  
-  // เช็คว่าเต็มหรือยัง
-  const isFull = enrolledSeats >= maxSeats && maxSeats > 0;
+                // 🌟 ดึงค่าจาก API: max_seats (ทั้งหมด) และ enrolled_seats (ลงแล้ว)
+                const maxSeats = item.max_seats || 0;
+                const enrolledSeats = item.enrolled_seats || 0;
 
-  return (
-    <View
-      key={`${item.course_code || item.course_id}-${item.section_type}-${idx}`}
-      style={styles.detailCard}
-    >
-      <View style={styles.cardAccent} />
-      <View style={styles.cardBody}>
-        <View style={styles.cardTop}>
-          <Text style={styles.detailCode}>
-            {item.course_code || item.course_id} Sec{" "}
-            {item.section_number || "1"}{" "}
-            {item.section_type ? `(${item.section_type})` : ""} 
-          </Text>
-          <Text style={styles.detailTime}>
-            {dayStr && startTime
-              ? `วัน${DAY_MAP[dayStr] || dayStr} ${startTime}-${endTime} น.`
-              : "ไม่มีข้อมูลเวลาเรียน"}
-          </Text>
-        </View>
+                // เช็คว่าเต็มหรือยัง
+                const isFull = enrolledSeats >= maxSeats && maxSeats > 0;
 
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-          <Text style={styles.courseName} numberOfLines={1}>
-            {item.course_name}
-          </Text>
-          <TouchableOpacity
-            onPress={() => removeItem(item.course_code || item.course_id, item.section_type)}
-            style={{ padding: 4 }}
-          >
-            <Feather name="trash-2" size={18} color="#E53935" />
-          </TouchableOpacity>
-        </View>
+                return (
+                  <View
+                    key={`${item.course_code || item.course_id}-${item.section_type}-${idx}`}
+                    style={styles.detailCard}
+                  >
+                    <View style={styles.cardAccent} />
+                    <View style={styles.cardBody}>
+                      <View style={styles.cardTop}>
+                        <Text style={styles.detailCode}>
+                          {item.course_code || item.course_id} Sec{" "}
+                          {item.section_number || "1"}{" "}
+                          {item.section_type ? `(${item.section_type})` : ""}
+                        </Text>
+                        <Text style={styles.detailTime}>
+                          {dayStr && startTime
+                            ? `วัน${DAY_MAP[dayStr] || dayStr} ${startTime}-${endTime} น.`
+                            : "ไม่มีข้อมูลเวลาเรียน"}
+                        </Text>
+                      </View>
 
-        <View style={styles.cardBottom}>
-          <Text style={styles.metaText}>
-            {item.credits ? `${item.credits} หน่วยกิต` : "ไม่ระบุหน่วยกิต"}
-          </Text>
-          <Text style={styles.metaText}>
-            {item.section_type === "T" ? "ทฤษฎี" : item.section_type === "L" ? "ปฏิบัติ" : ""}
-          </Text>
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                        }}
+                      >
+                        <Text style={styles.courseName} numberOfLines={1}>
+                          {item.course_name}
+                        </Text>
+                        <TouchableOpacity
+                          onPress={() =>
+                            removeItem(
+                              item.course_code || item.course_id,
+                              item.section_type,
+                            )
+                          }
+                          style={{ padding: 4 }}
+                        >
+                          <Feather name="trash-2" size={18} color="#E53935" />
+                        </TouchableOpacity>
+                      </View>
 
-          {/* 🌟 แสดงผลแบบ ลงแล้ว / ทั้งหมด (เช่น 1 / 40) */}
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Text style={styles.metaText}>ที่นั่ง: </Text>
-            <Text
-              style={[
-                styles.metaText,
-                {
-                  // ถ้าเต็มจะขึ้นสีแดง ถ้ายังไม่เต็มจะเป็นสีเขียว/เทาเข้ม
-                  color: isFull ? "#D32F2F" : "#2E7D32", 
-                  fontWeight: "bold",
-                },
-              ]}
-            >
-              {`ลงแล้ว ${enrolledSeats} / ${maxSeats}`} 
-            </Text>
-            {isFull && <Text style={{ color: '#D32F2F', fontSize: 10, marginLeft: 4 }}>(เต็ม)</Text>}
-          </View>
-        </View>
-      </View>
-    </View>
-  );
-})}
+                      <View style={styles.cardBottom}>
+                        <Text style={styles.metaText}>
+                          {item.credits
+                            ? `${item.credits} หน่วยกิต`
+                            : "ไม่ระบุหน่วยกิต"}
+                        </Text>
+                        <Text style={styles.metaText}>
+                          {item.section_type === "T"
+                            ? "ทฤษฎี"
+                            : item.section_type === "L"
+                              ? "ปฏิบัติ"
+                              : ""}
+                        </Text>
+
+                        {/* 🌟 แสดงผลแบบ ลงแล้ว / ทั้งหมด (เช่น 1 / 40) */}
+                        <View
+                          style={{ flexDirection: "row", alignItems: "center" }}
+                        >
+                          <Text style={styles.metaText}>ที่นั่ง: </Text>
+                          <Text
+                            style={[
+                              styles.metaText,
+                              {
+                                // ถ้าเต็มจะขึ้นสีแดง ถ้ายังไม่เต็มจะเป็นสีเขียว/เทาเข้ม
+                                color: isFull ? "#D32F2F" : "#2E7D32",
+                                fontWeight: "bold",
+                              },
+                            ]}
+                          >
+                            {`ลงแล้ว ${enrolledSeats} / ${maxSeats}`}
+                          </Text>
+                          {isFull && (
+                            <Text
+                              style={{
+                                color: "#D32F2F",
+                                fontSize: 10,
+                                marginLeft: 4,
+                              }}
+                            >
+                              (เต็ม)
+                            </Text>
+                          )}
+                        </View>
+                      </View>
+                    </View>
+                  </View>
+                );
+              })}
 
               <TouchableOpacity
                 style={styles.confirmButton}
@@ -605,17 +639,20 @@ export default function CartScreen({ student, setView }) {
             <MaterialIcons name="home" size={24} color="#837375" />
             <Text style={styles.navText}>HOME</Text>
           </TouchableOpacity>
+
           <TouchableOpacity
             style={styles.navItem}
             onPress={() => setView("MANUAL")}
           >
-            <MaterialIcons name="search" size={24} color="#837375" />
-            <Text style={styles.navText}>SEARCH</Text>
+            <MaterialIcons name="list" size={24} color="#837375" />
+            <Text style={styles.navText}>COURSES</Text>
           </TouchableOpacity>
+
           <TouchableOpacity style={styles.navItemActive}>
             <MaterialIcons name="shopping-cart" size={24} color="#a73355" />
             <Text style={styles.navTextActive}>CART</Text>
           </TouchableOpacity>
+
           <TouchableOpacity
             style={styles.navItem}
             onPress={() => setView("SCHEDULE")}

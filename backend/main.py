@@ -447,7 +447,7 @@ def view_cart(student_id: str, db: Session = Depends(get_db)):
                     "day_of_week": r.day_of_week, 
                     "start_time": str(r.start_time) if r.start_time else None,
                     "end_time": str(r.end_time) if r.end_time else None,
-                    "instructor_name": r.instructor_name,
+                    "instructor_name": r.instructor.instructor_name if r.instructor else "ไม่ระบุ",
                     "room": r.room,
                     
                     # 🌟 ดึงข้อมูลที่นั่งจากตาราง ClassSection (r) ส่งไปด้วย

@@ -18,7 +18,6 @@ import { LinearGradient } from "expo-linear-gradient";
 import {
   getAvailableCoursesAPI,
   aiSuggestAPI,
-  addToCartAPI,
   getZOptionsAPI,
   getCartAPI,
   getScheduleAPI,

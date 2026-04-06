@@ -175,25 +175,31 @@ export default function ManualScreen({ student, setView }) {
     // 🌟 รวมวิชาในตะกร้าและในตารางเรียนเข้าด้วยกันเพื่อเช็กทีเดียว
     const allRegistered = [...cart, ...schedule];
 
-    // ✅ เงื่อนไขที่ 1: เช็กว่ามีวิชานี้อยู่แล้วหรือไม่ (แยกทฤษฎี/ปฏิบัติ)
-    const existingSameType = allRegistered.find(
-      (i) => i.course_code === targetCourse.course_code && i.section_type === sectionType
+    // ✅ 1. เช็กว่าในตารางเรียน (Schedule) มีประเภทนี้หรือยัง?
+    const alreadyInSchedule = schedule.find(
+      (i) => i.course_code === targetCourse.course_code && (i.section_type === sectionType || i.type === sectionType)
     );
-    
-    if (existingSameType) {
+    if (alreadyInSchedule) {
       const typeLabel = sectionType === "T" ? "ทฤษฎี (T)" : "ปฏิบัติ (L)";
-      // หาว่าวิชานี้อยู่ตะกร้าหรือตารางเรียนเพื่อแจ้งผู้ใช้ให้ถูกที่
-      const location = cart.some(c => c.course_code === existingSameType.course_code) 
-        ? "ตะกร้า" 
-        : "ตารางเรียน";
-      
       return Alert.alert(
-        `❌ ไม่สามารถเพิ่มได้`,
-        `คุณมีวิชา ${targetCourse.course_code} Sec ${existingSameType.section_number} ${typeLabel}\nอยู่ใน "${location}" แล้วครับ`
+        "❌ ไม่สามารถเพิ่มได้",
+        `คุณได้ลงทะเบียนวิชา ${targetCourse.course_code} ${typeLabel} ไปเรียบร้อยแล้วในตารางเรียน`
       );
     }
 
-    // ✅ เงื่อนไขที่ 2: เช็กว่าเวลาเรียนชนกันหรือไม่
+    // ✅ 2. เช็กว่าในตะกร้า (Cart) มีประเภทนี้หรือยัง?
+    const alreadyInCart = cart.find(
+      (i) => i.course_code === targetCourse.course_code && i.section_type === sectionType
+    );
+    if (alreadyInCart) {
+      const typeLabel = sectionType === "T" ? "ทฤษฎี (T)" : "ปฏิบัติ (L)";
+      return Alert.alert(
+        "❌ ไม่สามารถเพิ่มได้",
+        `วิชา ${targetCourse.course_code} ${typeLabel} มีอยู่ในตะกร้าของคุณแล้ว (Sec ${alreadyInCart.section_number})\nหากต้องการเปลี่ยนกลุ่ม กรุณาลบออกจากตะกร้าก่อน`
+      );
+    }
+
+    // ✅ 3. เช็กว่าเวลาเรียนชนกันหรือไม่
     const conflict = allRegistered.find((i) => isTimeOverlapping(i, section));
     
     if (conflict) {

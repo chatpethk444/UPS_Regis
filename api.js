@@ -1,7 +1,8 @@
 // api.js — จุดเดียวสำหรับ call ทุก API
 // ✅ แก้ IP ที่นี่ที่เดียว ไม่ต้องแก้ทุกไฟล์
 
-export const BASE_URL = "http://10.230.252.135:8001";
+export const BASE_URL = "http://10.230.252.135:8000";
+//export const BASE_URL = "http://localhost:8000";
 // สำหรับเครื่องจริง: เปลี่ยนเป็น IP เครื่องคอม เช่น "http://192.168.1.x:8000"
 
 /**
@@ -136,14 +137,14 @@ export const batchAddWithCheckAPI = (student_id, items) =>
 export const withdrawCourseAPI = async (studentId, courseCode, sectionType) => {
   try {
     const response = await fetch(`${BASE_URL}/enrollment/withdraw`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         student_id: studentId,
         course_code: courseCode,
-        section_type: sectionType
+        section_type: sectionType,
       }),
     });
 

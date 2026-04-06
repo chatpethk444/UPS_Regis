@@ -124,6 +124,7 @@ def format_plan(plan: list) -> list:
             "section_number": str(s.section_number),
             "section_type": sec_type,
             "instructor": s.instructor_id,
+            "instructor_name": s.instructor_name, 
             "enrolled_seats": s.enrolled_seats,
             "max_seats": s.max_seats,
             "class_times": [{"day": raw_day, "start": start_float, "end": end_float}],
@@ -158,8 +159,8 @@ def login(request: dict, db: Session = Depends(get_db)):
             "year": student.curriculum_year,
             "faculty": student.faculty,
             "avatar_url": student.avatar_url,
-            "current_semester": getattr(student, 'current_semester', 1),
-            "current_semester": 2
+            "current_year": student.current_year,
+            "current_semester": student.current_semester or 1
         }
     raise HTTPException(status_code=401, detail="ไม่พบรหัสนักศึกษานี้ในระบบ")
 
@@ -174,7 +175,9 @@ def get_available_courses(student_id: str, db: Session = Depends(get_db)):
     if not student:
         raise HTTPException(status_code=404, detail="ไม่พบข้อมูลนักศึกษา")
 
-    current_year = calculate_student_year(student_id)
+    # ✅ ใช้ข้อมูลจากตาราง Student โดยตรง
+    current_year = student.current_year or calculate_student_year(student_id)
+    current_sem = student.current_semester or 1
 
     results = (
         db.query(Course, CurriculumCourse)
@@ -184,6 +187,7 @@ def get_available_courses(student_id: str, db: Session = Depends(get_db)):
             CurriculumCourse.major == student.major,
             CurriculumCourse.curriculum_year == student.curriculum_year,
             CurriculumCourse.suggested_year == current_year,
+            CurriculumCourse.suggested_semester == current_sem,
         )
         .all()
     )
@@ -255,8 +259,8 @@ def ai_suggest(data: dict, db: Session = Depends(get_db)):
     if not student_id:
         raise HTTPException(status_code=400, detail="ต้องระบุ student_id")
 
-    MAX_AI_COURSES = 10 # สมมติค่า ถ้ามีประกาศไว้ข้างนอกแล้วลบบรรทัดนี้ได้เลย
-    MAX_AI_PLANS = 5
+    MAX_AI_COURSES = 10 
+    MAX_AI_PLANS = 10
 
     if len(course_codes) > MAX_AI_COURSES:
         raise HTTPException(
@@ -283,19 +287,27 @@ def ai_suggest(data: dict, db: Session = Depends(get_db)):
         if not secs:
             continue
 
-        theory_secs = [s for s in secs if "(ท)" in str(s.room or "")]
-        practice_secs = [s for s in secs if "(ป)" in str(s.room or "")]
-        other_secs = [s for s in secs if s not in theory_secs and s not in practice_secs]
+        # ✅ จับกลุ่ม Row ตาม Section Number และ Type (ทฤษฎี/ปฏิบัติ)
+        # ป้องกันปัญหา 1 Section มีหลาย Row (เช่น เรียน 2 วัน) และดึงทุกรูปแบบ
+        groups = {}
+        for s in secs:
+            stype = get_section_type_from_room(s.room)
+            key = (s.section_number, stype)
+            if key not in groups: groups[key] = []
+            groups[key].append(s)
+
+        theory_options = [rows for (snum, stype), rows in groups.items() if stype == "T"]
+        practice_options = [rows for (snum, stype), rows in groups.items() if stype == "L"]
 
         course_options = []
-        if theory_secs and practice_secs:
-            course_options = [[t, p] for t, p in product(theory_secs, practice_secs)]
-        elif theory_secs:
-            course_options = [[t] for t in theory_secs]
-        elif practice_secs:
-            course_options = [[p] for p in practice_secs]
-        else:
-            course_options = [[o] for o in other_secs]
+        if theory_options and practice_options:
+            # กรณีมีทั้ง T และ L ให้หาผลคูณคาร์ทีเซียน (Cartesian Product) ทั้งหมด
+            for t_grp, p_grp in product(theory_options, practice_options):
+                course_options.append(t_grp + p_grp)
+        elif theory_options:
+            course_options = theory_options
+        elif practice_options:
+            course_options = practice_options
 
         if course_options:
             all_course_options.append(course_options)
@@ -352,14 +364,19 @@ def add_to_cart(request: CartRequest, db: Session = Depends(get_db)):
     if not section_type:
         section_type = "T"
 
-    # เช็กลงทะเบียนจริงไปแล้ว
-    already_enrolled = db.query(Enrollment).filter(
+    # ✅ เช็กการลงทะเบียนจริง: ถ้ามี type นี้ในตารางเรียนแล้ว ห้ามแอด type นี้ลงตะกร้าอีก
+    already_enrolled_same_type = db.query(Enrollment).filter(
         Enrollment.student_id == request.student_id,
         Enrollment.course_id == request.course_code,
-        Enrollment.section_number == sec_num_str,
+        Enrollment.section_type == section_type,
     ).first()
-    if already_enrolled:
-        raise HTTPException(status_code=400, detail="คุณได้ลงทะเบียนกลุ่มเรียนนี้ไปแล้ว")
+    
+    if already_enrolled_same_type:
+        type_label = "ทฤษฎี (T)" if section_type == "T" else "ปฏิบัติ (L)"
+        raise HTTPException(
+            status_code=400, 
+            detail=f"คุณได้ลงทะเบียน {type_label} ของวิชานี้ไปเรียบร้อยแล้วในตารางเรียน"
+        )
 
     # ✅ เช็กตะกร้า: วิชาเดียวกัน + section_type เดียวกัน → มีได้แค่ 1 section ต่อ type
     existing_same_type = db.query(EnrollmentCart).filter(
@@ -419,16 +436,23 @@ def view_cart(student_id: str, db: Session = Depends(get_db)):
                     continue
                 
                 # ✅ แยกฟิลด์ วัน เวลา และห้อง เพื่อให้แอปเอาไปคำนวณและวาดตารางได้
+                # 🌟 เพิ่มข้อมูลที่นั่งตรงนี้!
                 result.append({
                     "course_name": course.course_name,
                     "course_code": item.course_id,
                     "credits": course.credits,
                     "section_number": item.section_number,
                     "section_type": item.section_type or "T",
+                    
                     "day_of_week": r.day_of_week, 
                     "start_time": str(r.start_time) if r.start_time else None,
                     "end_time": str(r.end_time) if r.end_time else None,
-                    "room": r.room
+                    "instructor_name": r.instructor_name,
+                    "room": r.room,
+                    
+                    # 🌟 ดึงข้อมูลที่นั่งจากตาราง ClassSection (r) ส่งไปด้วย
+                    "max_seats": getattr(r, 'max_seats', 0),
+                    "enrolled_seats": getattr(r, 'enrolled_seats', 0)
                 })
                 added_schedule = True
 
@@ -443,7 +467,11 @@ def view_cart(student_id: str, db: Session = Depends(get_db)):
                 "day_of_week": None,
                 "start_time": None,
                 "end_time": None,
-                "room": None
+                "room": None,
+                
+                # 🌟 ถ้าไม่มีข้อมูลกลุ่มเรียน ก็ส่งค่าที่นั่งเป็น 0 ไปก่อน
+                "max_seats": 0,
+                "enrolled_seats": 0
             })
 
     return result
@@ -452,64 +480,78 @@ def view_cart(student_id: str, db: Session = Depends(get_db)):
 # =============================================================
 # 5. ระบบลงทะเบียนยกภาค (Batch Registration & Conflict Check)
 # =============================================================
+from fastapi import HTTPException
+
 @app.get("/courses/suggested/{student_id}")
 def get_suggested_courses(student_id: str, db: Session = Depends(get_db)):
+    # 1. ค้นหาข้อมูลนักศึกษาจาก Database
     student = db.query(Student).filter(Student.student_id == student_id).first()
-    if not student: raise HTTPException(status_code=404, detail="ไม่พบนักศึกษา")
+    if not student:
+        raise HTTPException(status_code=404, detail="ไม่พบข้อมูลนักศึกษา")
 
+    # 2. คำนวณชั้นปีของนักศึกษาจากรหัสนิสิต (2 ตัวแรก)
+    # กำหนดปีการศึกษาปัจจุบัน (ตัวอย่าง: ปี 2568 ใช้เลข 68) 
+    # รหัส 66 -> 68 - 66 + 1 = 3 (ปี 3)
+    CURRENT_ACADEMIC_YEAR = 68 
+    
     try:
-        adm_year = int(student_id[:2])
-        current_year = 66  
-        year_of_study = current_year - adm_year + 1
-    except:
-        year_of_study = 1
+        entry_year = int(student_id[:2]) # ดึง "66" ออกมา
+        student_year = CURRENT_ACADEMIC_YEAR - entry_year + 1
+    except ValueError:
+        student_year = 1 # ค่าเริ่มต้นถ้าดึงรหัสไม่ได้
 
-    prefix = ""
-    major = student.major or ""
-    if "วิศวกรรมคอมพิวเตอร์" in major: prefix = "C"
-    elif "โลจิสติกส์" in major: prefix = "L"
-    elif "เทคโนโลยีสารสนเทศ" in major: prefix = "I"
+    # 3. ดึงเทอมปัจจุบันของนักศึกษา
+    current_sem = student.current_semester or 1
 
-    # 🌟 เพิ่มการกรอง suggested_semester == 2 ตรงนี้
-    curr_courses = db.query(CurriculumCourse, Course).join(
-        Course, CurriculumCourse.course_id == Course.course_id
-    ).filter(
-        CurriculumCourse.suggested_year == year_of_study,
-        CurriculumCourse.suggested_semester == 2
-    ).all()
+    # 4. กรองรายวิชาจากหลักสูตร ให้ตรงกับ "คณะ", "สาขา", "ปี" และ "เทอม"
+    suggested_courses = (
+        db.query(CurriculumCourse, Course)
+        .join(Course, CurriculumCourse.course_id == Course.course_id)
+        .filter(
+            # ❌ ลบบรรทัด CurriculumCourse.curriculum_id == student.major ทิ้งไป
 
-    results = []
-    for cc, crs in curr_courses:
-        if prefix and not crs.course_id.startswith(prefix):
-            continue
-        
-        secs = db.query(ClassSection).filter(ClassSection.course_id == crs.course_id).all()
-        sec_dict = {}
-        for s in secs:
-            sec_num = str(s.section_number)
-            if sec_num not in sec_dict:
-                sec_dict[sec_num] = []
+            # ✅ เพิ่ม 3 บรรทัดนี้เพื่อกรอง คณะ, สาขา และ ปีหลักสูตร ให้ตรงกับนักศึกษา
+            CurriculumCourse.faculty == student.faculty,
+            CurriculumCourse.major == student.major,
+            CurriculumCourse.curriculum_year == student.curriculum_year, # เช็คปีของหลักสูตรด้วย (เช่น หลักสูตรปี 60 หรือ 65)
             
-            sec_type = get_section_type_from_room(s.room or "")
-            sec_dict[sec_num].append({
-                "section_type": sec_type,
-                "day_of_week": s.day_of_week,
-                "start_time": str(s.start_time)[:5] if s.start_time else None,
-                "end_time": str(s.end_time)[:5] if s.end_time else None,
-                "room": s.room,
-                "max_seats": getattr(s, 'max_seats', 30), 
-                "enrolled_seats": getattr(s, 'enrolled_seats', 0)
-                
-            })
-        
-        if sec_dict:
-            results.append({
-                "course_code": crs.course_id,
-                "course_name": crs.course_name,
-                "credits": crs.credits,
-                "sections": sec_dict
-            })
-    return results
+            # เช็คชั้นปีที่เรียนและเทอมปัจจุบัน
+            CurriculumCourse.suggested_year == student_year,
+            CurriculumCourse.suggested_semester == current_sem
+        )
+        .all()
+    )
+
+    # 5. กรองรายวิชาเฉพาะวิชาภาค (Major Specific) ตามรหัสวิชา
+    # CPE = วิศวกรรมคอมพิวเตอร์, ICT = เทคโนโลยีสารสนเทศ, LSM = โลจิสติกส์
+    major_prefix_map = {
+        "วิศวกรรมคอมพิวเตอร์": "CPE",
+        "เทคโนโลยีสารสนเทศและการสื่อสาร": "ICT",
+        "การจัดการโลจิสติกส์และโซ่อุปทาน": "LSM"
+    }
+    
+    target_prefix = major_prefix_map.get(student.major)
+
+    result = []
+    for curr_course, course in suggested_courses:
+        # ✅ 1. ดึงชื่อวิชาอย่างปลอดภัย
+        final_name = getattr(course, 'course_name', None) or 'Unknown'
+        course_code = course.course_id
+
+        # ✅ 2. ถ้ามี Prefix ของสาขา ให้กรองเฉพาะวิชาที่ขึ้นต้นด้วย Prefix นั้น
+        # (ยกเว้นวิชาที่เป็นวิชาเลือกหมวด Z ที่อาจต้องแสดงผลด้วย แต่อันนี้เน้นวิชาภาคตามโจทย์)
+        if target_prefix and not course_code.upper().startswith(target_prefix):
+            continue
+
+        result.append({
+            "course_code": course_code,
+            "course_name": final_name,
+            "credits": course.credits,
+            "suggested_year": curr_course.suggested_year,
+            "suggested_semester": curr_course.suggested_semester
+        })
+
+    return result
 
 # ✅ อัปเดต Model ให้รับแยก T และ L ได้
 class BatchItem(BaseModel):
@@ -641,7 +683,9 @@ def get_my_schedule(student_id: str, db: Session = Depends(get_db)):
                 "day_of_week": sec.day_of_week,
                 "start_time": str(sec.start_time) if sec.start_time else "",
                 "end_time": str(sec.end_time) if sec.end_time else "",
-                "room": sec.room
+                "room": sec.room,
+                #ใช้ instructor.instructor_name แทน instructor_id เพื่อให้ได้ชื่ออาจารย์มาแสดงผลในตารางเรียน
+                "instructor_name": sec.instructor.instructor_name if sec.instructor else "ไม่ระบุ",
             })
             
     return result

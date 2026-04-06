@@ -13,7 +13,7 @@ import {
 import { MaterialIcons, Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 // 🌟 1. อย่าลืมเพิ่ม withdrawCourseAPI ไว้ใน api.js ของคุณด้วย (หรือใช้ API ถอนรายวิชาที่คุณมี)
-import { getScheduleAPI, withdrawCourseAPI } from "../api"; 
+import { getScheduleAPI, withdrawCourseAPI } from "../api";
 
 const { width } = Dimensions.get("window");
 
@@ -47,15 +47,32 @@ const DAY_MAP = {
 };
 
 const DAY_ORDER = {
-  Mon: 1, Tuesday: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7,
-  Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5,
-  จันทร์: 1, อังคาร: 2, พุธ: 3, พฤหัสบดี: 4, พฤหัส: 4, ศุกร์: 5, เสาร์: 6, อาทิตย์: 7,
+  Mon: 1,
+  Tuesday: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
+  Sun: 7,
+  Monday: 1,
+  Tuesday: 2,
+  Wednesday: 3,
+  Thursday: 4,
+  Friday: 5,
+  จันทร์: 1,
+  อังคาร: 2,
+  พุธ: 3,
+  พฤหัสบดี: 4,
+  พฤหัส: 4,
+  ศุกร์: 5,
+  เสาร์: 6,
+  อาทิตย์: 7,
 };
 
 export default function ScheduleScreen({ student, setView }) {
   const [schedule, setSchedule] = useState([]);
   const [loading, setLoading] = useState(false);
-  
+
   // 🌟 2. เพิ่ม State สำหรับเก็บวิชาที่เลือกถอน
   const [selectedToWithdraw, setSelectedToWithdraw] = useState([]);
 
@@ -74,14 +91,21 @@ export default function ScheduleScreen({ student, setView }) {
           if (!t) return 0;
           const str = String(t);
           if (str.includes(":"))
-            return parseInt(str.split(":")[0]) * 60 + parseInt(str.split(":")[1]);
+            return (
+              parseInt(str.split(":")[0]) * 60 + parseInt(str.split(":")[1])
+            );
           if (str.includes("."))
-            return parseInt(str.split(".")[0]) * 60 + Math.round(parseFloat(`0.${str.split(".")[1]}`) * 60);
+            return (
+              parseInt(str.split(".")[0]) * 60 +
+              Math.round(parseFloat(`0.${str.split(".")[1]}`) * 60)
+            );
           return parseFloat(str) * 60;
         };
 
         const formatTime = (mins) => {
-          const h = Math.floor(mins / 60).toString().padStart(2, "0");
+          const h = Math.floor(mins / 60)
+            .toString()
+            .padStart(2, "0");
           const m = (mins % 60).toString().padStart(2, "0");
           return `${h}:${m}`;
         };
@@ -89,37 +113,50 @@ export default function ScheduleScreen({ student, setView }) {
         const mergedSchedule = data.reduce((acc, curr) => {
           const dayCurr = curr.day_of_week || curr.class_times?.[0]?.day;
 
-          const startCurr = parseTime(curr.start_time || curr.class_times?.[0]?.start);
-          const endCurr = parseTime(curr.end_time || curr.class_times?.[0]?.end);
+          const startCurr = parseTime(
+            curr.start_time || curr.class_times?.[0]?.start,
+          );
+          const endCurr = parseTime(
+            curr.end_time || curr.class_times?.[0]?.end,
+          );
 
-          let currentType = curr.section_type || curr.type || curr.class_times?.[0]?.type;
+          let currentType =
+            curr.section_type || curr.type || curr.class_times?.[0]?.type;
           if (!currentType) {
-            currentType = (endCurr - startCurr > 120) ? "L" : "T";
+            currentType = endCurr - startCurr > 120 ? "L" : "T";
           }
 
           const existingIdx = acc.findIndex((item) => {
             const dayItem = item.day_of_week || item.class_times?.[0]?.day;
-            const isSameCourseAndDay = item.course_code === curr.course_code && 
+            const isSameCourseAndDay =
+              item.course_code === curr.course_code &&
               (dayItem === dayCurr || DAY_MAP[dayItem] === DAY_MAP[dayCurr]);
-            
+
             if (isSameCourseAndDay) {
-               const startEx = parseTime(item.start_time || item.class_times?.[0]?.start);
-               const endEx = parseTime(item.end_time || item.class_times?.[0]?.end);
-               return (startCurr <= endEx + 15 && endCurr >= startEx - 15);
+              const startEx = parseTime(
+                item.start_time || item.class_times?.[0]?.start,
+              );
+              const endEx = parseTime(
+                item.end_time || item.class_times?.[0]?.end,
+              );
+              return startCurr <= endEx + 15 && endCurr >= startEx - 15;
             }
             return false;
           });
 
           if (existingIdx !== -1) {
             const ex = acc[existingIdx];
-            const startEx = parseTime(ex.start_time || ex.class_times?.[0]?.start);
+            const startEx = parseTime(
+              ex.start_time || ex.class_times?.[0]?.start,
+            );
             const endEx = parseTime(ex.end_time || ex.class_times?.[0]?.end);
 
             ex.start_time = formatTime(Math.min(startEx, startCurr));
             ex.end_time = formatTime(Math.max(endEx, endCurr));
 
             const type1 = ex.section_type || "T";
-            if (!type1.includes(currentType)) ex.section_type = `${type1}+${currentType}`;
+            if (!type1.includes(currentType))
+              ex.section_type = `${type1}+${currentType}`;
           } else {
             acc.push({ ...curr, section_type: currentType });
           }
@@ -129,7 +166,7 @@ export default function ScheduleScreen({ student, setView }) {
         mergedSchedule.sort((a, b) => {
           const dayA = DAY_ORDER[a.day_of_week] || 99;
           const dayB = DAY_ORDER[b.day_of_week] || 99;
-          
+
           if (dayA !== dayB) return dayA - dayB;
           return parseTime(a.start_time) - parseTime(b.start_time);
         });
@@ -209,7 +246,9 @@ export default function ScheduleScreen({ student, setView }) {
                 const [code, combinedType] = id.split("|");
                 const types = combinedType.split("+"); // เผื่อกรณีวิชาโดนยุบเป็น T+L ให้แยกส่งไปถอน
                 types.forEach((type) => {
-                  promises.push(withdrawCourseAPI(student.student_id, code, type));
+                  promises.push(
+                    withdrawCourseAPI(student.student_id, code, type),
+                  );
                 });
               });
 
@@ -222,7 +261,7 @@ export default function ScheduleScreen({ student, setView }) {
             }
           },
         },
-      ]
+      ],
     );
   };
 
@@ -239,9 +278,11 @@ export default function ScheduleScreen({ student, setView }) {
           onPress: async () => {
             setLoading(true);
             try {
-              const types = combinedType.split("+"); 
-              const promises = types.map((type) => withdrawCourseAPI(student.student_id, courseCode, type));
-              
+              const types = combinedType.split("+");
+              const promises = types.map((type) =>
+                withdrawCourseAPI(student.student_id, courseCode, type),
+              );
+
               await Promise.all(promises);
               Alert.alert("สำเร็จ", "ถอนรายวิชาเรียบร้อยแล้ว");
               fetchSchedule();
@@ -251,7 +292,7 @@ export default function ScheduleScreen({ student, setView }) {
             }
           },
         },
-      ]
+      ],
     );
   };
 
@@ -291,14 +332,39 @@ export default function ScheduleScreen({ student, setView }) {
             <>
               {/* 🗓️ Grid Preview */}
               <View style={styles.gridOuterContainer}>
-                <ScrollView horizontal={true} showsHorizontalScrollIndicator={true}>
-                  <View style={{ width: TOTAL_GRID_WIDTH + DAY_COLUMN_WIDTH + 100 }}>
+                <ScrollView
+                  horizontal={true}
+                  showsHorizontalScrollIndicator={true}
+                >
+                  <View
+                    style={{ width: TOTAL_GRID_WIDTH + DAY_COLUMN_WIDTH + 100 }}
+                  >
                     {/* Time Labels */}
                     <View style={styles.timeHeaderRow}>
                       <View style={{ width: DAY_COLUMN_WIDTH }} />
-                      <View style={{ flex: 1, flexDirection: "row", position: "relative" }}>
-                        {Array.from({ length: COLUMN_COUNT + 1 }, (_, i) => GRID_START_HOUR + i).map((h, i) => (
-                          <Text key={h} style={[styles.timeLabel, { position: "absolute", left: i * ONE_HOUR_WIDTH - 10, width: 20, textAlign: "center" }]}>
+                      <View
+                        style={{
+                          flex: 1,
+                          flexDirection: "row",
+                          position: "relative",
+                        }}
+                      >
+                        {Array.from(
+                          { length: COLUMN_COUNT + 1 },
+                          (_, i) => GRID_START_HOUR + i,
+                        ).map((h, i) => (
+                          <Text
+                            key={h}
+                            style={[
+                              styles.timeLabel,
+                              {
+                                position: "absolute",
+                                left: i * ONE_HOUR_WIDTH - 10,
+                                width: 20,
+                                textAlign: "center",
+                              },
+                            ]}
+                          >
                             {h}
                           </Text>
                         ))}
@@ -306,51 +372,118 @@ export default function ScheduleScreen({ student, setView }) {
                     </View>
 
                     {/* Day Rows */}
-                    {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((dayKey) => (
-                      <View key={dayKey} style={styles.dayRow}>
-                        <View style={styles.dayLabelContainer}>
-                          <Text style={styles.dayTextTh}>วัน{DAY_MAP[dayKey]}</Text>
-                        </View>
-                        <View style={[styles.gridContent, { width: TOTAL_GRID_WIDTH }]}>
-                          {Array.from({ length: COLUMN_COUNT + 1 }).map((_, i) => (
-                            <View key={i} style={[styles.vLine, { left: i * ONE_HOUR_WIDTH }]} />
-                          ))}
+                    {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(
+                      (dayKey) => (
+                        <View key={dayKey} style={styles.dayRow}>
+                          <View style={styles.dayLabelContainer}>
+                            <Text style={styles.dayTextTh}>
+                              วัน{DAY_MAP[dayKey]}
+                            </Text>
+                          </View>
+                          <View
+                            style={[
+                              styles.gridContent,
+                              { width: TOTAL_GRID_WIDTH },
+                            ]}
+                          >
+                            {Array.from({ length: COLUMN_COUNT + 1 }).map(
+                              (_, i) => (
+                                <View
+                                  key={i}
+                                  style={[
+                                    styles.vLine,
+                                    { left: i * ONE_HOUR_WIDTH },
+                                  ]}
+                                />
+                              ),
+                            )}
 
-                          {schedule
-                            .filter((course) => {
-                              const d = course.day_of_week;
-                              return d === dayKey || DAY_MAP[d] === DAY_MAP[dayKey];
-                            })
-                            .map((item, idx) => {
-                              const pos = getBoxStyle(item.start_time, item.end_time);
-                              return (
-                                <View key={idx} style={[styles.courseBox, { left: pos.left + 1, width: pos.width - 2 }]}>
-                                  <Text style={styles.boxCode} numberOfLines={1}>
-                                    {item.course_code} ({item.section_type || "T"})
-                                  </Text>
-                                  <Text style={styles.boxTime} numberOfLines={1}>
-                                    {formatTimeDisplay(item.start_time)}-{formatTimeDisplay(item.end_time)}
-                                  </Text>
-                                </View>
-                              );
-                            })}
+                            {schedule
+                              .filter((course) => {
+                                const d = course.day_of_week;
+                                return (
+                                  d === dayKey || DAY_MAP[d] === DAY_MAP[dayKey]
+                                );
+                              })
+                              .map((item, idx) => {
+                                const pos = getBoxStyle(
+                                  item.start_time,
+                                  item.end_time,
+                                );
+                                return (
+                                  <View
+                                    key={idx}
+                                    style={[
+                                      styles.courseBox,
+                                      {
+                                        left: pos.left + 1,
+                                        width: pos.width - 2,
+                                      },
+                                    ]}
+                                  >
+                                    <Text
+                                      style={styles.boxCode}
+                                      numberOfLines={1}
+                                    >
+                                      {item.course_code} (
+                                      {item.section_type || "T"})
+                                    </Text>
+                                    <Text
+                                      style={styles.boxTime}
+                                      numberOfLines={1}
+                                    >
+                                      {formatTimeDisplay(item.start_time)}-
+                                      {formatTimeDisplay(item.end_time)}
+                                    </Text>
+                                  </View>
+                                );
+                              })}
+                          </View>
                         </View>
-                      </View>
-                    ))}
+                      ),
+                    )}
                   </View>
                 </ScrollView>
               </View>
 
               {/* Course Detail Header พร้อมปุ่มถอนรวม */}
-              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 20, marginBottom: 10 }}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginTop: 20,
+                  marginBottom: 10,
+                }}
+              >
                 <Text style={styles.sectionTitle}>รายละเอียดวิชา</Text>
                 {selectedToWithdraw.length > 0 && (
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     onPress={handleWithdrawMultiple}
-                    style={{ backgroundColor: "#E53935", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, flexDirection: "row", alignItems: "center" }}
+                    style={{
+                      backgroundColor: "#E53935",
+                      paddingHorizontal: 12,
+                      paddingVertical: 6,
+                      borderRadius: 8,
+                      flexDirection: "row",
+                      alignItems: "center",
+                    }}
                   >
-                    <Feather name="trash-2" size={16} color="#FFF" style={{ marginRight: 4 }} />
-                    <Text style={{ color: "#FFF", fontWeight: "bold", fontSize: 12 }}>ถอนที่เลือก ({selectedToWithdraw.length})</Text>
+                    <Feather
+                      name="trash-2"
+                      size={16}
+                      color="#FFF"
+                      style={{ marginRight: 4 }}
+                    />
+                    <Text
+                      style={{
+                        color: "#FFF",
+                        fontWeight: "bold",
+                        fontSize: 12,
+                      }}
+                    >
+                      ถอนที่เลือก ({selectedToWithdraw.length})
+                    </Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -358,7 +491,10 @@ export default function ScheduleScreen({ student, setView }) {
               {/* 📝 รายละเอียดวิชาด้านล่างแบบเลือกถอนได้ */}
               {schedule.map((item, idx) => {
                 let typeLabel = "ทฤษฎี";
-                if (item.section_type?.includes("T") && item.section_type?.includes("L")) {
+                if (
+                  item.section_type?.includes("T") &&
+                  item.section_type?.includes("L")
+                ) {
                   typeLabel = "ทฤษฎีและปฏิบัติ";
                 } else if (item.section_type?.includes("L")) {
                   typeLabel = "ปฏิบัติ";
@@ -368,46 +504,89 @@ export default function ScheduleScreen({ student, setView }) {
                 const isSelected = selectedToWithdraw.includes(itemId);
 
                 return (
-                  <TouchableOpacity 
-                    key={idx} 
-                    style={[styles.detailCard, isSelected && { borderColor: "#a73355", borderWidth: 2 }]}
+                  <TouchableOpacity
+                    key={idx}
+                    style={[
+                      styles.detailCard,
+                      isSelected && { borderColor: "#a73355", borderWidth: 2 },
+                    ]}
                     activeOpacity={0.8}
-                    onPress={() => toggleSelection(item.course_code, item.section_type)}
+                    onPress={() =>
+                      toggleSelection(item.course_code, item.section_type)
+                    }
                   >
                     <View style={styles.cardAccent} />
                     <View style={styles.cardBody}>
                       <View style={styles.cardTop}>
-                        <View style={{ flexDirection: "row", alignItems: "center" }}>
+                        <View
+                          style={{ flexDirection: "row", alignItems: "center" }}
+                        >
                           {/* 🌟 Checkbox */}
-                          <MaterialIcons 
-                            name={isSelected ? "check-box" : "check-box-outline-blank"} 
-                            size={22} 
-                            color={isSelected ? "#a73355" : "#ccc"} 
+                          <MaterialIcons
+                            name={
+                              isSelected
+                                ? "check-box"
+                                : "check-box-outline-blank"
+                            }
+                            size={22}
+                            color={isSelected ? "#a73355" : "#ccc"}
                             style={{ marginRight: 8 }}
                           />
-                          <Text style={styles.detailCode}>{item.course_code}</Text>
+                          <Text style={styles.detailCode}>
+                            {item.course_code}
+                          </Text>
                         </View>
                         <Text style={styles.detailTime}>
-                          วัน{DAY_MAP[item.day_of_week]} {formatTimeDisplay(item.start_time)} - {formatTimeDisplay(item.end_time)} น.
+                          วัน{DAY_MAP[item.day_of_week]}{" "}
+                          {formatTimeDisplay(item.start_time)} -{" "}
+                          {formatTimeDisplay(item.end_time)} น.
                         </Text>
                       </View>
-                      
-                      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginLeft: 30 }}>
-                        <Text style={styles.courseName} numberOfLines={1}>{item.course_name}</Text>
-                        
+
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          marginLeft: 30,
+                        }}
+                      >
+                        <Text style={styles.courseName} numberOfLines={1}>
+                          {item.course_name}
+                        </Text>
+
                         {/* 🌟 ปุ่มถังขยะสำหรับถอนรายวิชาแบบตัวเดียว */}
-                        <TouchableOpacity 
-                          onPress={() => handleWithdrawSingle(item.course_code, item.section_type)} 
+                        <TouchableOpacity
+                          onPress={() =>
+                            handleWithdrawSingle(
+                              item.course_code,
+                              item.section_type,
+                            )
+                          }
                           style={{ padding: 4 }}
                         >
                           <Feather name="trash-2" size={18} color="#E53935" />
                         </TouchableOpacity>
                       </View>
-                      
+
+                      {/* 👇 แทรกชื่ออาจารย์ใน View นี้ 👇 */}
                       <View style={[styles.cardBottom, { marginLeft: 30 }]}>
-                        <Text style={styles.metaText}>Sec {item.section_number}</Text>
-                        <Text style={styles.metaText}>รูปแบบ:{typeLabel}</Text>
-                        <Text style={styles.metaText}>Room {item.room || "N/A"}</Text>
+                        <Text style={styles.metaText}>
+                          กลุ่ม: {item.section_number} {typeLabel}
+                        </Text>
+
+                        {/* 🌟 เพิ่มชื่ออาจารย์ตรงนี้ครับ */}
+                        <Text style={styles.metaText}>
+                          ห้อง {item.room || "N/A"}
+                        </Text>
+                      </View>
+
+                      <View style={[styles.cardBottom, { marginLeft: 30 }]}>
+                        {item.instructor_name && (
+                          <Text style={styles.metaText}>
+                            อาจารย์: {item.instructor_name}
+                          </Text>
+                        )}
                       </View>
                     </View>
                   </TouchableOpacity>
@@ -419,19 +598,31 @@ export default function ScheduleScreen({ student, setView }) {
 
         {/* Bottom Nav */}
         <View style={styles.bottomNav}>
-          <TouchableOpacity style={styles.navItem} onPress={() => setView("MENU")}>
+          <TouchableOpacity
+            style={styles.navItem}
+            onPress={() => setView("MENU")}
+          >
             <MaterialIcons name="home" size={24} color="#837375" />
             <Text style={styles.navText}>HOME</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.navItem} onPress={() => setView("MANUAL")}>
+          <TouchableOpacity
+            style={styles.navItem}
+            onPress={() => setView("MANUAL")}
+          >
             <MaterialIcons name="search" size={24} color="#837375" />
             <Text style={styles.navText}>SEARCH</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.navItem} onPress={() => setView("CART")}>
+          <TouchableOpacity
+            style={styles.navItem}
+            onPress={() => setView("CART")}
+          >
             <MaterialIcons name="shopping-cart" size={24} color="#837375" />
             <Text style={styles.navText}>CART</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.navItem} onPress={() => setView("SCHEDULE")}>
+          <TouchableOpacity
+            style={styles.navItem}
+            onPress={() => setView("SCHEDULE")}
+          >
             <View style={styles.navItemActive}>
               <MaterialIcons name="calendar-today" size={24} color="#a73355" />
               <Text style={styles.navText}>SCHEDULE</Text>

@@ -27,8 +27,17 @@ class Student(Base):
     avatar_url = Column(String(255))
     current_year = Column(Integer)
     current_semester = Column(Integer,default=1)
+    #  password_hash = Column(String(255))  # 🔒 เพิ่มสำหรับระบบ Password ในอนาคต
+
+class Instructor(Base):
+    __tablename__ = 'instructor'
     
-#  password_hash = Column(String(255))  # 🔒 เพิ่มสำหรับระบบ Password ในอนาคต
+    # สมมติว่า Primary Key ของตารางนี้คือ instructor_id
+    instructor_id = Column(String(50), primary_key=True) 
+    instructor_name = Column(String(100))  
+
+
+
 
 # ---------------- ตารางวิชาเรียน ----------------
 class Course(Base):
@@ -65,13 +74,15 @@ class ClassSection(Base):
     course_id = Column(String(20), ForeignKey('course.course_id'), nullable=False)
     semester = Column(String(20))
     section_number = Column(Integer)
-    instructor_id = Column(String(20))
+    instructor_id = Column(String(50), ForeignKey('instructor.instructor_id'))
+    instructor = relationship("Instructor")
     day_of_week = Column(String(15))
     start_time = Column(Time)
     end_time = Column(Time)
     room = Column(String(50))
     max_seats = Column(Integer)
     enrolled_seats = Column(Integer, default=0)
+    
 
     # ✅ Index เพื่อให้ query /sections/{course_code} เร็วขึ้น
     __table_args__ = (
@@ -100,6 +111,7 @@ class Enrollment(Base):
     enroll_id = Column(Integer, primary_key=True, autoincrement=True)
     student_id = Column(String(20), ForeignKey('student.student_id'), nullable=False)
     course_id = Column(String(20), ForeignKey('course.course_id'), nullable=False)
+    
     section_number = Column(String(20))
     section_type = Column(String(10))
     # ✅ Index ให้ดึงตารางเรียนเร็วขึ้น

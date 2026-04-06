@@ -140,7 +140,7 @@ const styles = StyleSheet.create({
   profileSection: { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 24 },
   // 🌟 ปรับขนาดของ container ให้คงที่ กันจุดเขียวเบี้ยวเวลาไม่มีรูป
   profileImageContainer: { position: 'relative', width: 64, height: 64, borderRadius: 32, backgroundColor: 'white' },
-  profileImage: { width: '100%', height: '100%', borderRadius: 32 },
+  profileImage: { width: '100%', height: '100%', borderRadius: 32 , borderColor: '#D23669', borderWidth: 2 },
   statusDot: { position: 'absolute', bottom: 2, right: 2, width: 14, height: 14, backgroundColor: '#22c55e', borderRadius: 7, borderWidth: 2, borderColor: '#fff' },
   welcomeText: { fontSize: 20, fontWeight: '800', color: '#1f1a1c', marginBottom: 2 },
   majorText: { fontSize: 12, fontWeight: '600', color: '#514345' },

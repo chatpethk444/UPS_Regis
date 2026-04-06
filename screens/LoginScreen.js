@@ -5,19 +5,31 @@ import {
   Text, 
   TextInput, 
   TouchableOpacity, 
-  StyleSheet, 
   SafeAreaView, 
-  ActivityIndicator
+  ActivityIndicator,
+  Modal, // เพิ่ม Modal
+  Alert  // เพิ่ม Alert
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons'; 
 import { LinearGradient } from 'expo-linear-gradient';
 import { styles } from "../components/shared";
 
-
 export default function LoginScreen({ loading, onLogin }) {
   const [sid, setSid] = useState('');
   const [pw, setPw] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+
+  // ฟังก์ชันจัดการตอนกดปุ่ม Login
+  const handleLogin = () => {
+    // 1. แจ้งเตือนถ้ากรอกข้อมูลไม่ครบ
+    if (!sid.trim() || !pw.trim()) {
+      Alert.alert("แจ้งเตือน", "กรุณากรอกรหัสนักศึกษาและรหัสผ่านให้ครบถ้วน");
+      return;
+    }
+    // 2. เรียกฟังก์ชัน onLogin เดิม
+    onLogin(sid, pw);
+  };
+
   return (
     <LinearGradient 
       colors={['#fff8f8', '#fbf1f3', '#f0bebe']} 
@@ -25,6 +37,38 @@ export default function LoginScreen({ loading, onLogin }) {
     >
       <SafeAreaView style={styles.innerContainer}>
         
+        {/* 🌟 Popup โหลด (Modal) 🌟 */}
+        <Modal
+          transparent={true}
+          animationType="fade"
+          visible={loading}
+          onRequestClose={() => {}}
+        >
+          <View style={{
+            flex: 1,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)', // พื้นหลังโปร่งแสงสีดำ
+            justifyContent: 'center',
+            alignItems: 'center'
+          }}>
+            <View style={{
+              backgroundColor: '#fff',
+              padding: 24,
+              borderRadius: 12,
+              alignItems: 'center',
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.25,
+              shadowRadius: 4,
+              elevation: 5
+            }}>
+              <ActivityIndicator size="large" color="#a73355" />
+              <Text style={{ marginTop: 12, fontSize: 16, color: '#333', fontWeight: 'bold' }}>
+                กำลังเข้าสู่ระบบ...
+              </Text>
+            </View>
+          </View>
+        </Modal>
+
         {/* ส่วนหัว Logo */}
         <View style={styles.headerWrapper}>
           <View style={styles.logoBox}>
@@ -84,18 +128,13 @@ export default function LoginScreen({ loading, onLogin }) {
             </View>
           </View>
 
-
-          {/* ปุ่ม Login ที่เชื่อมกับ App.js เดิม */}
+          {/* เปลี่ยนไปเรียกใช้ handleLogin แทน */}
           <TouchableOpacity 
             style={styles.loginButton} 
-            onPress={() => onLogin(sid, pw)}
+            onPress={handleLogin}
             disabled={loading}
           >
-            {loading ? (
-              <ActivityIndicator color="#ffffff" />
-            ) : (
-              <Text style={styles.loginButtonText}>เข้าสู่ระบบ</Text>
-            )}
+            <Text style={styles.loginButtonText}>เข้าสู่ระบบ</Text>
           </TouchableOpacity>
 
         </View>
@@ -103,4 +142,3 @@ export default function LoginScreen({ loading, onLogin }) {
     </LinearGradient>
   );
 }
-

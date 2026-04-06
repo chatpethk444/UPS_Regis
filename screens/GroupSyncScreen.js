@@ -155,6 +155,29 @@ export default function GroupSyncScreen({ student, setView }) {
   };
 
   const handleSyncCart = () => {
+    // 🌟 1. เช็คที่นั่งเหลือพอสำหรับทุกคนในกลุ่มไหมก่อน Sync
+    const memberCount = approvedMembers.length;
+    const insufficientSeats = cartData.filter((item) => {
+      if ((item.max_seats || 0) <= 0) return false;
+      const available = (item.max_seats || 0) - (item.enrolled_seats || 0);
+      return available < memberCount;
+    });
+
+    if (insufficientSeats.length > 0) {
+      const names = insufficientSeats
+        .map(
+          (i) =>
+            `${i.course_code} (เหลือ ${
+              i.max_seats - i.enrolled_seats
+            } ที่นั่ง)`,
+        )
+        .join(", ");
+      return Alert.alert(
+        "ที่นั่งไม่เพียงพอ",
+        `วิชาต่อไปนี้มีที่นั่งไม่พอสำหรับสมาชิกทั้ง ${memberCount} คน: ${names}\nกรุณาเปลี่ยนกลุ่มเรียนในตะกร้าของคุณก่อน Sync ให้เพื่อน`,
+      );
+    }
+
     Alert.alert(
       "ยืนยันการ Sync รายวิชา",
       "ระบบจะคัดลอกตะกร้าของคุณไปใส่ให้เพื่อนแทน และตรวจสอบวิชาซ้ำ/ชนเวลา ยืนยันหรือไม่?",
@@ -166,7 +189,10 @@ export default function GroupSyncScreen({ student, setView }) {
             setLoading(true);
             try {
               const res = await syncGroupCartAPI(student.student_id);
-              Alert.alert("สำเร็จ!", res.message || "อัปเดตวิชาให้เพื่อนทุกคนแล้ว");
+              Alert.alert(
+                "สำเร็จ!",
+                res.message || "อัปเดตวิชาให้เพื่อนทุกคนแล้ว",
+              );
               fetchMyGroup();
             } catch (e) {
               Alert.alert("ไม่สามารถ Sync ได้", e.message);
@@ -180,39 +206,63 @@ export default function GroupSyncScreen({ student, setView }) {
   };
 
   const handleRegisterGroup = () => {
+    // 🌟 2. เช็คที่นั่งเหลือพอสำหรับทุกคนในกลุ่มไหมก่อนลงทะเบียนจริง
+    const memberCount = approvedMembers.length;
+    const insufficientSeats = cartData.filter((item) => {
+      if ((item.max_seats || 0) <= 0) return false;
+      const available = (item.max_seats || 0) - (item.enrolled_seats || 0);
+      return available < memberCount;
+    });
+
+    if (insufficientSeats.length > 0) {
+      const names = insufficientSeats
+        .map(
+          (i) =>
+            `${i.course_code} (เหลือ ${
+              i.max_seats - i.enrolled_seats
+            } ที่นั่ง)`,
+        )
+        .join(", ");
+      return Alert.alert(
+        "ที่นั่งไม่เพียงพอ",
+        `วิชาต่อไปนี้มีที่นั่งไม่พอสำหรับสมาชิกทั้ง ${memberCount} คน: ${names}\nกรุณาเปลี่ยนกลุ่มเรียนก่อนกดยืนยัน`,
+      );
+    }
+
     Alert.alert(
       "ยืนยันการลงทะเบียน",
       "จะทำการลงทะเบียนวิชาในตะกร้าให้ทุกคน ยืนยันหรือไม่?",
       [
         { text: "ยกเลิก", style: "cancel" },
-        { 
-          text: "ยืนยัน", 
+        {
+          text: "ยืนยัน",
           onPress: async () => {
             setLoading(true);
             try {
               // 1. เรียก API ลงทะเบียนรายวิชา
               await registerGroupAllAPI(student.student_id);
-              
-              // 2. เรียก API ยุบกลุ่มทันทีเมื่อลงทะเบียนเสร็จ
-              await deleteGroupAPI(student.student_id);
-              
-              Alert.alert("สำเร็จ", "ลงทะเบียนให้ทุกคนเรียบร้อย และทำการยุบกลุ่มแล้ว!", [
-                { 
-                  text: "ไปดูตารางเรียน", 
-                  onPress: () => setView("SCHEDULE") 
-                }
-              ]);
-              
-              // 3. อัปเดตสถานะหน้าจอ (จะทำให้กลับไปหน้าจอเริ่มต้นที่ไม่มีกลุ่ม)
+
+              Alert.alert(
+                "สำเร็จ",
+                "ลงทะเบียนให้ทุกคนเรียบร้อยแล้ว! สมาชิกคนอื่นจะได้รับการแจ้งเตือนทันที",
+                [
+                  {
+                    text: "ไปดูตารางเรียน",
+                    onPress: () => setView("SCHEDULE"),
+                  },
+                ],
+              );
+
+              // 2. อัปเดตสถานะหน้าจอ
               await fetchMyGroup();
             } catch (e) {
               Alert.alert("ข้อผิดพลาด", e.message);
             } finally {
               setLoading(false);
             }
-          }
-        }
-      ]
+          },
+        },
+      ],
     );
   };
 
@@ -411,6 +461,8 @@ export default function GroupSyncScreen({ student, setView }) {
                     <View style={{ flex: 1 }}>
                       <Text style={styles.miniCode}>{item.course_code} Sec {item.section} ({item.section_type})</Text>
                       <Text style={styles.miniName} numberOfLines={1}>{item.course_name}</Text>
+                      {/* 📅 เพิ่มวันและเวลาเรียน */}
+                      <Text style={styles.miniTime}>📅 {item.day} | ⏰ {item.time_info}</Text>
                       <Text style={styles.miniSeats}>ที่นั่ง: {item.enrolled_seats}/{item.max_seats} (ว่าง {item.max_seats - item.enrolled_seats})</Text>
                     </View>
                   </View>
@@ -514,6 +566,7 @@ const styles = StyleSheet.create({
   courseCardMini: { backgroundColor: "#fff", padding: 12, borderRadius: 12, marginBottom: 8, borderLeftWidth: 4, borderLeftColor: "#a73355", elevation: 1 },
   miniCode: { fontSize: 13, fontWeight: "bold", color: "#a73355" },
   miniName: { fontSize: 11, color: "#514345" },
+  miniTime: { fontSize: 10, color: "#7b5455", marginTop: 2 },
   miniSeats: { fontSize: 10, fontWeight: "bold", color: "#837375", marginTop: 4 },
   footerActions: { gap: 12, marginBottom: 50 },
   mainBtn: { backgroundColor: "#a73355", padding: 16, borderRadius: 15, alignItems: "center" },

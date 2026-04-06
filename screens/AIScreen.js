@@ -89,13 +89,15 @@ export default function AIScreen({ student, setView }) {
             getAvailableCoursesAPI(student.student_id).catch(() => []),
           ]);
 
+          const targetSemester = student.current_semester || 1;
+
           const carts = Array.isArray(cartData) 
-            ? cartData.filter(c => c.suggested_semester == 2) 
+            ? cartData.filter(c => c.suggested_semester == targetSemester) 
             : [];
           const scheds = Array.isArray(scheduleData) ? scheduleData : [];
           const courses = Array.isArray(coursesData) 
-  ? coursesData.filter(c => c.suggested_semester == 2) 
-  : [];
+            ? coursesData.filter(c => c.suggested_semester == targetSemester) 
+            : [];
 
           // 🌟 2. เซฟข้อมูลแบบเต็มๆ เก็บไว้ให้ระบบเช็คเวลาชน
           setCartItems(carts);
@@ -151,12 +153,10 @@ export default function AIScreen({ student, setView }) {
     setLoadingCourses(true);
     try {
       const data = await getAvailableCoursesAPI(student.student_id);
+      const targetSemester = student.current_semester || 1;
       
-      // ของเดิม: setAvailableCourses(Array.isArray(data) ? data : []);
-      
-      // ✅ เปลี่ยนเป็น: กรองเอาเฉพาะเทอม 2
       setAvailableCourses(
-        Array.isArray(data) ? data.filter(c => c.suggested_semester == 2) : []
+        Array.isArray(data) ? data.filter(c => c.suggested_semester == targetSemester) : []
       );
     } catch (err) {
       console.error(err);
@@ -217,6 +217,21 @@ export default function AIScreen({ student, setView }) {
   };
 
   const handleAcceptSuggestion = async (plan) => {
+    // 🌟 0. เช็คที่นั่งเต็มก่อนทำอย่างอื่น
+    const fullCourses = plan.filter(
+      (item) => (item.max_seats || 0) > 0 && (item.enrolled_seats || 0) >= (item.max_seats || 0),
+    );
+
+    if (fullCourses.length > 0) {
+      const courseNames = fullCourses
+        .map((c) => `${c.course_code} (Sec ${c.section_number})`)
+        .join(", ");
+      return Alert.alert(
+        "ไม่สามารถเลือกแผนนี้ได้",
+        `วิชาต่อไปนี้ที่นั่งเต็มแล้ว: ${courseNames}\nกรุณาเลือกแผนอื่นหรือกดจัดใหม่`,
+      );
+    }
+
     setCalculating(true);
     try {
       // 🌟 1. ดึงข้อมูลสด
@@ -537,7 +552,25 @@ export default function AIScreen({ student, setView }) {
         student.student_id,
         item.course_code,
       );
-      setZOptions(options);
+
+      // 🌟 1. กรองวิชาของสาขาตัวเองออก (เช็คจาก student.major)
+      let filteredOptions = options || [];
+      const major = student.major || "";
+
+      if (major.includes("วิศวกรรมคอมพิวเตอร์")) {
+        filteredOptions = filteredOptions.filter(c => !c.course_code.startsWith("CPE"));
+      } else if (major.includes("เทคโนโลยีสารสนเทศ")) {
+        filteredOptions = filteredOptions.filter(c => !c.course_code.startsWith("ICT"));
+      } else if (major.includes("โลจิสติกส์") || major.includes("โซ่อุปทาน")) {
+        filteredOptions = filteredOptions.filter(c => !c.course_code.startsWith("LSM"));
+      }
+
+      // 🌟 2. กำจัดวิชาที่ซ้ำกัน (ป้องกัน Error: two children with the same key)
+      const uniqueOptions = Array.from(
+        new Map(filteredOptions.map((opt) => [opt.course_code, opt])).values()
+      );
+
+      setZOptions(uniqueOptions);
     } catch (error) {
       Alert.alert("ข้อผิดพลาด", "ไม่สามารถดึงข้อมูลรายวิชาทดแทนได้");
     } finally {
@@ -965,7 +998,7 @@ export default function AIScreen({ student, setView }) {
                     const scheduleSet = new Set(scheduleCourseCodes || []);
                     const selectedSet = new Set(selectedCodes || []);
 
-                    return availableCourses.map((c) => {
+                    return availableCourses.map((c, index) => {
                       const inCart = cartSet.has(c.course_code);
                       const inSchedule = scheduleSet.has(c.course_code);
                       const isSelected = selectedSet.has(c.course_code);
@@ -1125,39 +1158,51 @@ export default function AIScreen({ student, setView }) {
                 />
               ) : (
                 <FlatList
-                  data={zOptions}
-                  keyExtractor={(item) => item.course_code}
-                  renderItem={({ item }) => (
-                    <View style={styles.zCourseCard}>
-                      <Text style={styles.zCourseCode}>
-                        {item.course_code} {item.course_name}
-                      </Text>
-                      <Text style={styles.zCourseCredit}>
-                        หน่วยกิต: {item.credits}
-                      </Text>
-                      <TouchableOpacity
-                        style={{
-                          backgroundColor: "#D23669",
-                          padding: 10,
-                          borderRadius: 8,
-                          marginTop: 12,
-                          alignItems: "center",
-                        }}
-                        onPress={() => handleSelectZOption(item)}
-                      >
-                        <Text
-                          style={{
-                            color: "#fff",
-                            fontWeight: "bold",
-                            fontSize: 14,
-                          }}
-                        >
-                          เลือกวิชานี้
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
-                />
+  data={zOptions}
+  keyExtractor={(item, index) => `${item.course_code}-${index}`}
+  renderItem={({ item }) => (
+    <View 
+      style={[
+        styles.zCourseCard, 
+        { 
+          flexDirection: 'row', // จัดให้อยู่แนวนอนเดียวกัน
+          alignItems: 'center', // ให้อยู่กึ่งกลางแนวตั้ง
+          justifyContent: 'space-between' // ดันซ้าย-ขวาให้สุด
+        }
+      ]}
+    >
+      
+      {/* 🌟 ฝั่งซ้าย: ข้อมูลวิชา (ใส่ flex: 1 เพื่อไม่ให้ข้อความไปดันปุ่ม) */}
+      <View style={{ flex: 1, marginRight: 12 }}>
+        <Text style={styles.zCourseCode}>
+          {item.course_code} {item.course_name}
+        </Text>
+        <Text style={styles.zCourseCredit}>
+          หน่วยกิต: {item.credits}
+        </Text>
+      </View>
+
+      {/* 🌟 ฝั่งขวา: ปุ่มเลือก */}
+      <TouchableOpacity
+        style={{
+          backgroundColor: "#D23669",
+          paddingVertical: 10,
+          paddingHorizontal: 16,
+          borderRadius: 8,
+          alignItems: "center",
+          justifyContent: "center",
+          minWidth: 90, // ล็อคขนาดปุ่มขั้นต่ำไว้ไม่ให้บี้แบน
+        }}
+        onPress={() => handleSelectZOption(item)}
+      >
+        <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 14 }}>
+          เลือกวิชานี้
+        </Text>
+      </TouchableOpacity>
+      
+    </View>
+  )}
+/>
               )}
             </View>
           </View>

@@ -21,6 +21,27 @@ import {
   getScheduleAPI,
 } from "../api";
 
+// 🌟 Helper Function สำหรับจัดเรียง Section (เรียงเลข Sec ก่อน แล้วเอา Theory ขึ้นก่อน Lab)
+  const sortSectionsArray = (sections) => {
+    if (!sections) return [];
+    return [...sections].sort((a, b) => {
+      // 1. เรียงตาม Sec Number (น้อยไปมาก)
+      const secA = parseInt(a.section_number) || 0;
+      const secB = parseInt(b.section_number) || 0;
+      if (secA !== secB) return secA - secB;
+
+      // 2. ถ้า Sec Number เท่ากัน ให้เช็กว่าเป็น Lab หรือ Theory
+      const isLabA = a.type === "L" || a.section_type === "L" || (a.room && String(a.room).toLowerCase().includes("lab"));
+      const isLabB = b.type === "L" || b.section_type === "L" || (b.room && String(b.room).toLowerCase().includes("lab"));
+
+      if (!isLabA && isLabB) return -1; // A (Theory) มาก่อน B (Lab)
+      if (isLabA && !isLabB) return 1;  // B (Theory) มาก่อน A (Lab)
+      return 0;
+    });
+  };
+
+
+
 // ✅ แยก api.js ให้รับ section_type ด้วย
 async function addToCartWithType(
   student_id,
@@ -138,11 +159,18 @@ export default function ManualScreen({ student, setView }) {
           new Map(filteredOptions.map((opt) => [opt.course_code, opt])).values()
         );
 
-        setZOptions(uniqueOptions);
+        // 🌟 เรียง Section ย่อยๆ ในแต่ละวิชา Z Option
+        const sortedZOptions = uniqueOptions.map(opt => ({
+          ...opt,
+          sections: sortSectionsArray(opt.sections)
+        }));
+
+        setZOptions(sortedZOptions);
         setSections([]);
       } else {
         const data = await getSectionsAPI(course.course_code);
-        setSections(data);
+        // 🌟 เรียง Section สำหรับวิชาปกติ
+        setSections(sortSectionsArray(data));
         setZOptions(null);
       }
     } catch (e) {
@@ -245,18 +273,18 @@ export default function ManualScreen({ student, setView }) {
   const renderSectionItem = (course, sec, index) => {
     const isFull = sec.enrolled_seats >= sec.max_seats;
 
-    const isZCourse = course.course_code.startsWith("Z");
+    // 🌟 แก้ไขการเช็ก Lab ให้ดูจากค่า type และ room ตรงๆ
     const isLab =
       sec.type === "L" ||
-      (sec.room && sec.room.toLowerCase().includes("lab")) ||
-      (isZCourse && index === 1);
+      sec.section_type === "L" ||
+      (sec.room && String(sec.room).toLowerCase().includes("lab"));
 
     const isT = !isLab;
     const displayType = isT ? "T" : "L";
 
     return (
       <View
-        key={`sec-${sec.section_number}-${index}`}
+        key={`sec-${sec.section_number}-${index}-${displayType}`} // กัน key ซ้ำ
         style={styles.sectionCard}
       >
         <View style={styles.sectionInfo}>

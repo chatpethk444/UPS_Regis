@@ -227,6 +227,8 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: "800",
     color: "#1f1a1c",
+    letterSpacing: 1,
+    textTransform: "uppercase",
     marginBottom: 2,
   },
   majorText: { fontSize: 12, fontWeight: "600", color: "#514345" },

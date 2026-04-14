@@ -8,7 +8,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Dimensions,
-  Alert,
+  Modal,
 } from "react-native";
 import { MaterialIcons, Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -18,6 +18,8 @@ import {
   removeFromCartAPI,
   confirmEnrollmentAPI,
   getScheduleAPI,
+  getCourseSectionsAPI, // ดึงข้อมูลทุก section ของรายวิชานั้น
+  addToCartAPI,         // เพิ่มวิชาเข้าตะกร้า
 } from "../api";
 
 const { width } = Dimensions.get("window");
@@ -64,15 +66,151 @@ export default function CartScreen({ student, setView }) {
   const [enrolledItems, setEnrolledItems] = useState([]); // 🌟 2. เพิ่ม State เก็บตารางเรียน
   const [loadingCart, setLoadingCart] = useState(false);
   const [scheduleData, setScheduleData] = useState([]);
+  const [selectedToRemove, setSelectedToRemove] = useState([]);
+  // 🌟 State แบบใหม่: รองรับการปรับเปลี่ยนหลายวิชาพร้อมกัน
+  const [changeSectionModalVisible, setChangeSectionModalVisible] = useState(false);
+  const [adjustments, setAdjustments] = useState([]); // [{ target, alternatives, selectedNewSection }]
+  const [isSuppressed, setIsSuppressed] = useState(false); // 🌟 เพิ่ม flag เพื่อระงับ Pop-up ชั่วคราว
+
+  // 🌟 โค้ดที่เพิ่มใหม่: เอาไว้คุม Pop-up สวยๆ
+  const [modalConfig, setModalConfig] = useState({
+    visible: false,
+    type: "success",
+    title: "",
+    message: "",
+    confirmText: "ตกลง",
+    showCancel: false,
+    onConfirm: null,
+  });
+
+  const showCustomAlert = (
+    type,
+    title,
+    message,
+    onConfirm = null,
+    showCancel = false,
+    confirmText = "ตกลง",
+  ) => {
+    setModalConfig({
+      visible: true,
+      type,
+      title,
+      message,
+      onConfirm,
+      showCancel,
+      confirmText,
+    });
+  };
+
+  const closeModal = () => {
+    setModalConfig((prev) => ({ ...prev, visible: false }));
+  };
 
   useEffect(() => {
-    fetchCart();
-  }, []);
+    const init = async () => {
+      const cartData = await fetchCart(false);
+      // 🌟 รอ 5 วินาทีหลังจากโหลดเสร็จ ก่อนจะเช็ควิชาเต็ม (ตามความต้องการของผู้ใช้)
+      setTimeout(() => {
+        if (cartData && cartData.length > 0) {
+          checkFullItemsAndSuggest(cartData);
+        }
+      }, 10000);
+    };
+    init();
 
-  const fetchCart = async () => {
-    setLoadingCart(true);
+    const intervalId = setInterval(async () => {
+      const cartData = await fetchCart(true);
+      // 🌟 ในพื้นหลัง ถ้ามีวิชาเต็มและ Modal ยังไม่เปิด ให้เปิดขึ้นมา
+      if (cartData && cartData.length > 0 && !changeSectionModalVisible) {
+        checkFullItemsAndSuggest(cartData);
+      }
+    }, 10000);
+
+    return () => clearInterval(intervalId);
+  }, [changeSectionModalVisible]);
+
+  // 🌟 ฟังก์ชันใหม่: เช็ควิชาเต็มและเสนอทางเลือกทันที (ใช้ตอนโหลดหน้า หรือตอนกดยืนยัน)
+  const checkFullItemsAndSuggest = async (currentItems = null) => {
+    // 🌟 ถ้ากำลังระงับ (เพิ่งเปลี่ยนเสร็จ) หรือ Modal เปิดอยู่แล้ว ให้ข้ามไปเลย
+    if (isSuppressed || changeSectionModalVisible) return false;
+
     try {
-      // 🌟 3. ดึงข้อมูลทั้ง 2 แหล่ง (ตะกร้า และ ตารางเรียนปัจจุบัน)
+      setLoadingCart(true); // 🌟 โชว์ Loading เพื่อให้ผู้ใช้รู้ว่ากำลังเช็คข้อมูลล่าสุด
+      
+      // ถ้าไม่ได้ส่งข้อมูลมา ให้ Fetch ใหม่จากเซิร์ฟเวอร์โดยตรง เพื่อความชัวร์ 100%
+      let itemsToCheck = currentItems;
+      if (!itemsToCheck) {
+        itemsToCheck = await fetchCart(true); // ดึงข้อมูลใหม่เงียบๆ มาใส่ variable
+      }
+
+      if (!itemsToCheck || itemsToCheck.length === 0) {
+        setLoadingCart(false);
+        return false;
+      }
+
+      // กรองหาเฉพาะตัวที่ที่นั่งเต็ม
+      const fullItems = itemsToCheck.filter(
+        (item) =>
+          (item.max_seats || 0) > 0 &&
+          (item.enrolled_seats || 0) >= (item.max_seats || 0),
+      );
+
+      if (fullItems.length > 0) {
+        const uniqueCourseCodes = [...new Set(fullItems.map(it => it.course_code || it.course_id))];
+        
+        const responses = await Promise.all(
+          uniqueCourseCodes.map(code => getCourseSectionsAPI(code).catch(() => []))
+        );
+        
+        const sectionsMap = {};
+        uniqueCourseCodes.forEach((code, idx) => {
+          sectionsMap[code] = responses[idx];
+        });
+
+        const newAdjustments = fullItems.map(target => {
+          const courseCode = target.course_code || target.course_id;
+          const allSections = sectionsMap[courseCode] || [];
+          
+          const openSections = allSections.filter(
+            (sec) =>
+              (sec.max_seats || 0) > 0 &&
+              (sec.enrolled_seats || 0) < (sec.max_seats || 0) &&
+              (sec.section_number !== target.section_number || sec.section_type !== target.section_type) &&
+              sec.section_type === target.section_type
+          );
+
+          return { target, alternatives: openSections, selectedNewSection: null };
+        });
+
+        setLoadingCart(false); // 🌟 ปิด Loading หลัก เมื่อเตรียมข้อมูลเสร็จ
+        const hasAlternatives = newAdjustments.some(adj => adj.alternatives.length > 0);
+
+        if (hasAlternatives) {
+          setAdjustments(newAdjustments);
+          setChangeSectionModalVisible(true);
+          return true;
+        } else {
+          return false;
+        }
+      }
+      
+      setLoadingCart(false);
+      return false;
+    } catch (e) {
+      console.log("Error checking full items:", e);
+      setLoadingCart(false);
+      return false;
+    }
+  };
+
+  // 🌟 ปรับ fetchCart ให้รับค่า isBackground และคืนค่าข้อมูล
+  const fetchCart = async (isBackground = false) => {
+    if (!isBackground) {
+      setLoadingCart(true);
+      setSelectedToRemove([]);
+    }
+
+    try {
       const [cartData, scheduleResponse] = await Promise.all([
         getCartAPI(student.student_id).catch(() => []),
         getScheduleAPI(student.student_id).catch(() => []),
@@ -112,7 +250,8 @@ export default function CartScreen({ student, setView }) {
         const existingIdx = acc.findIndex(
           (item) =>
             item.course_code === curr.course_code &&
-            item.day_of_week === curr.day_of_week,
+            item.day_of_week === curr.day_of_week &&
+            item.section_type === curr.section_type,
         );
 
         if (existingIdx !== -1) {
@@ -144,10 +283,12 @@ export default function CartScreen({ student, setView }) {
       }, []);
 
       setScheduleData(merged);
+      return validCartData; // 🌟 คืนค่าข้อมูล
     } catch (e) {
-      Alert.alert("Error", e.message);
+      if (!isBackground) showCustomAlert("error", "Error", e.message);
+      return [];
     } finally {
-      setLoadingCart(false);
+      if (!isBackground) setLoadingCart(false);
     }
   };
 
@@ -180,30 +321,28 @@ export default function CartScreen({ student, setView }) {
   };
 
   const removeItem = (courseCode, sectionType) => {
-    Alert.alert("ลบวิชา", `ต้องการลบ ${courseCode} ออกจากตะกร้าหรือไม่?`, [
-      { text: "ยกเลิก", style: "cancel" },
-      {
-        text: "ลบ",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            await removeFromCartAPI(
-              student.student_id,
-              courseCode,
-              sectionType,
-            );
-            fetchCart();
-          } catch (e) {
-            Alert.alert("ข้อผิดพลาด", e.message);
-          }
-        },
+    showCustomAlert(
+      "confirm", // 1. ประเภท: เป็นแบบยืนยัน (จะโชว์ไอคอนเครื่องหมายคำถาม/สีของแอป)
+      "ลบวิชา", // 2. หัวข้อ:
+      `ต้องการลบ ${courseCode} ออกจากตะกร้าหรือไม่?`, // 3. ข้อความรายละเอียด
+
+      // 4. ฟังก์ชันที่จะรันเมื่อผู้ใช้กดปุ่ม "ตกลง/ลบวิชา"
+      async () => {
+        try {
+          await removeFromCartAPI(student.student_id, courseCode, sectionType);
+          fetchCart();
+        } catch (e) {
+          showCustomAlert("error", "ข้อผิดพลาด", e.message);
+        }
       },
-    ]);
+
+      true, // 5. โชว์ปุ่มยกเลิกไหม? (ใส่ true เพราะต้องการให้มีปุ่มยกเลิกด้วย)
+      "ลบ", // 6. คำบนปุ่มตกลง (เปลี่ยนจากคำว่า "ตกลง" เป็น "ลบ")
+    );
   };
 
   // 🌟 4. ฟังก์ชันเช็คชนขั้นเด็ดขาด (จับรวมวิชาในตะกร้า + ตารางเรียนมาชนกัน)
   const checkConflicts = () => {
-    // เอาข้อมูลตะกร้า และ ตารางเรียน มารวมกันชั่วคราวเพื่อตรวจการทับซ้อน
     const allItemsToVerify = [
       ...items.map((c) => ({ ...c, source: "ตะกร้า" })),
       ...enrolledItems.map((c) => ({ ...c, source: "ตารางเรียน" })),
@@ -214,7 +353,6 @@ export default function CartScreen({ student, setView }) {
         const c1 = allItemsToVerify[i];
         const c2 = allItemsToVerify[j];
 
-        // ถ้าทั้ง 2 วิชามันอยู่ใน "ตารางเรียน" ทั้งคู่อยู่แล้ว ข้ามได้เลย ไม่ต้องตรวจ (เพราะลงไปแล้ว)
         if (c1.source === "ตารางเรียน" && c2.source === "ตารางเรียน") continue;
 
         if (
@@ -257,7 +395,6 @@ export default function CartScreen({ student, setView }) {
           const code1 = c1.course_code || c1.course_id || "Unknown1";
           const code2 = c2.course_code || c2.course_id || "Unknown2";
 
-          // เช็คการลงวิชาซ้ำ (เช่น วิชานี้มีในตารางเรียนแล้ว แต่ดันมากดลงซ้ำในตะกร้า)
           if (
             code1 === code2 &&
             c1.section_number === c2.section_number &&
@@ -274,7 +411,6 @@ export default function CartScreen({ student, setView }) {
             continue;
           }
 
-          // เช็คเวลาเหลื่อมกัน
           if (s1 > 0 && e1 > 0 && s2 > 0 && e2 > 0) {
             if (s1 < e2 && s2 < e1) {
               return {
@@ -291,30 +427,21 @@ export default function CartScreen({ student, setView }) {
     return { hasConflict: false };
   };
 
-  const confirmRegistration = () => {
+  const confirmRegistration = async () => {
+    // ✅ แก้: ใส่ "warning" เป็นตัวแรก
     if (items.length === 0) {
-      Alert.alert("แจ้งเตือน", "ตะกร้าว่างเปล่า ไม่มีวิชาให้ลงทะเบียน");
+      showCustomAlert(
+        "warning",
+        "แจ้งเตือน",
+        "ตะกร้าว่างเปล่า ไม่มีวิชาให้ลงทะเบียน",
+      );
       return;
     }
 
-    // 🌟 0. เช็คที่นั่งเต็มก่อน
-    const fullItems = items.filter(
-      (item) =>
-        (item.max_seats || 0) > 0 &&
-        (item.enrolled_seats || 0) >= (item.max_seats || 0),
-    );
+    // 🌟 เช็ควิชาเต็มอีกครั้งก่อนกดยืนยันจริงๆ
+    const hasFull = await checkFullItemsAndSuggest(items);
+    if (hasFull) return; // ถ้ามี Modal เด้ง ให้หยุดการทำงานตรงนี้ก่อน
 
-    if (fullItems.length > 0) {
-      const courseNames = fullItems
-        .map((c) => `${c.course_code || c.course_id} (Sec ${c.section_number})`)
-        .join(", ");
-      return Alert.alert(
-        "ไม่สามารถลงทะเบียนได้",
-        `วิชาต่อไปนี้ที่นั่งเต็มแล้ว: ${courseNames}\nกรุณาลบออกจากตะกร้าก่อนกดยืนยัน`,
-      );
-    }
-
-    // 🌟 5. รันฟังก์ชันตรวจจับชนก่อนที่จะเด้ง Popup ยืนยัน
     const conflictCheck = checkConflicts();
 
     if (conflictCheck.hasConflict) {
@@ -324,36 +451,134 @@ export default function CartScreen({ student, setView }) {
       const code2 = c2.course_code || c2.course_id;
 
       if (conflictCheck.isDuplicate) {
-        Alert.alert(
+        // ✅ แก้: ถอดวงเล็บก้ามปู [{...}] ทิ้งไป ใช้ String เปล่าแทน
+        showCustomAlert(
+          "error",
           "🚨 ลงทะเบียนซ้ำซ้อน",
           `คุณได้ลงทะเบียนวิชา ${code1} ไปในตารางเรียนแล้ว!\nโปรดลบออกจากตะกร้าก่อน`,
-          [{ text: "เข้าใจแล้ว", style: "cancel" }],
         );
       } else {
-        Alert.alert(
+        // ✅ แก้: ถอดวงเล็บก้ามปู [{...}] ทิ้งไป
+        showCustomAlert(
+          "error",
           "🚨 พบเวลาเรียนทับซ้อน!",
           `วิชา ${code1} (ใน${c1.source})\nทับซ้อนกับ ${code2} (ใน${c2.source})\n\nโปรดแก้ไขให้เรียบร้อยก่อนกดยืนยัน`,
-          [{ text: "ตกลง", style: "cancel" }],
         );
       }
       return; // ⛔️ เตะออก ไม่ยอมให้เรียก API ลงทะเบียนเด็ดขาด!
     }
 
-    Alert.alert("ยืนยัน", "ต้องการลงทะเบียนวิชาในตะกร้าทั้งหมดหรือไม่?", [
-      { text: "ยกเลิก", style: "cancel" },
-      {
-        text: "ยืนยัน",
-        onPress: async () => {
-          try {
-            await confirmEnrollmentAPI(student.student_id);
-            Alert.alert("สำเร็จ", "ลงทะเบียนเรียบร้อย!");
-            setView("SCHEDULE");
-          } catch (e) {
-            Alert.alert("ข้อผิดพลาด", e.message);
-          }
-        },
+    // ✅ แก้: ฟังก์ชันกดยืนยันที่ถูกต้อง จัดเรียงพารามิเตอร์ครบ 6 ตัว
+    showCustomAlert(
+      "confirm",
+      "ยืนยัน",
+      "ต้องการลงทะเบียนวิชาในตะกร้าทั้งหมดหรือไม่?",
+      async () => {
+        try {
+          await confirmEnrollmentAPI(student.student_id);
+          // ถ้าลงทะเบียนผ่าน ให้เด้ง Pop-up Success แล้วพอปิดค่อยไปหน้า Schedule
+          showCustomAlert("success", "สำเร็จ", "ลงทะเบียนเรียบร้อย!", () =>
+            setView("SCHEDULE"),
+          );
+        } catch (e) {
+          showCustomAlert("error", "ข้อผิดพลาด", e.message);
+        }
       },
-    ]);
+      true,
+      "ยืนยัน",
+    );
+  };
+
+  
+  // 🌟 ฟังก์ชันสลับ Section ในตะกร้า (แบบใหม่ รองรับหลายวิชา)
+  const handleApplyNewSection = async () => {
+    // กรองเอาเฉพาะรายการที่ผู้ใช้เลือกเปลี่ยนจริง
+    const itemsToChange = adjustments.filter(adj => adj.selectedNewSection !== null);
+    if (itemsToChange.length === 0) {
+      setChangeSectionModalVisible(false);
+      return;
+    }
+
+    try {
+      setChangeSectionModalVisible(false);
+      setIsSuppressed(true); // 🌟 ระงับการเช็คทันที
+      setLoadingCart(true);
+
+      // วนลูปเปลี่ยนทีละวิชา/ประเภท
+      for (const adj of itemsToChange) {
+        const { target, selectedNewSection: selected } = adj;
+        const courseCode = target.course_code || target.course_id;
+
+        // ลบวิชา (Section เก่าที่เต็ม)
+        await removeFromCartAPI(student.student_id, courseCode, target.section_type);
+        
+        // Add วิชา (Section ใหม่ที่เลือก)
+        await addToCartAPI(student.student_id, courseCode, selected.section_number, selected.section_type);
+      }
+
+      await fetchCart(false); // โหลดตะกร้าใหม่
+      setLoadingCart(false);
+
+      showCustomAlert("success", "เปลี่ยน Section สำเร็จ", `อัปเดตวิชาที่เลือกให้เรียบร้อยแล้ว`, () => {
+        // 🌟 หลังจากกดตกลง ให้รออีก 5 วินาที แล้วค่อยเปิดการเช็คใหม่อีกรอบ
+        setTimeout(() => {
+          setIsSuppressed(false);
+        }, 5000);
+      });
+    } catch (error) {
+      console.log("สาเหตุที่ API พัง:", error);
+      setLoadingCart(false);
+      setIsSuppressed(false); // ถ้าพังให้เปิดการเช็คกลับมา
+      showCustomAlert("error", "เปลี่ยน Section ไม่สำเร็จ", error.message);
+    }
+  };
+
+  // Helper สำหรับการเลือก Section ในรายการ Adjustment
+  const updateAdjustmentSelection = (adjIndex, section) => {
+    const newAdjustments = [...adjustments];
+    newAdjustments[adjIndex].selectedNewSection = section;
+    setAdjustments(newAdjustments);
+  };
+
+  // 🌟 2. ฟังก์ชัน Toggle Checkbox
+  const toggleSelection = (courseCode, sectionType) => {
+    const id = `${courseCode}|${sectionType}`;
+    if (selectedToRemove.includes(id)) {
+      setSelectedToRemove((prev) => prev.filter((item) => item !== id));
+    } else {
+      setSelectedToRemove((prev) => [...prev, id]);
+    }
+  };
+
+  // 🌟 3. ฟังก์ชันลบวิชาที่เลือกพร้อมกันหลายรายการ
+  const removeMultipleItems = () => {
+    showCustomAlert(
+      "confirm",
+      "ลบวิชาที่เลือก",
+      `ต้องการลบวิชาที่เลือกทั้ง ${selectedToRemove.length} รายการออกจากตะกร้าหรือไม่?`,
+      async () => {
+        try {
+          setLoadingCart(true);
+          const promises = selectedToRemove.map((id) => {
+            const [code, type] = id.split("|");
+            return removeFromCartAPI(student.student_id, code, type);
+          });
+          await Promise.all(promises);
+
+          showCustomAlert(
+            "success",
+            "สำเร็จ",
+            "ลบวิชาออกจากตะกร้าเรียบร้อยแล้ว",
+          );
+          fetchCart(); // รีเฟรชตารางใหม่
+        } catch (e) {
+          showCustomAlert("error", "ข้อผิดพลาด", e.message);
+          setLoadingCart(false);
+        }
+      },
+      true,
+      "ลบ",
+    );
   };
 
   return (
@@ -368,7 +593,8 @@ export default function CartScreen({ student, setView }) {
             <MaterialIcons name="arrow-back" size={24} color="#7b5455" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>ตะกร้าของฉัน</Text>
-          <TouchableOpacity onPress={fetchCart}>
+          {/* 🌟 ปรับตรงนี้ */}
+          <TouchableOpacity onPress={() => fetchCart(false)}>
             <MaterialIcons name="refresh" size={24} color="#a73355" />
           </TouchableOpacity>
         </View>
@@ -470,7 +696,7 @@ export default function CartScreen({ student, setView }) {
                                 );
                                 return (
                                   <View
-                                    key={`${item.course_code}-${idx}`}
+                                    key={`${item.course_code}-${item.section_type}-${idx}`} // 🌟 เพิ่ม section_type ใน key กัน React แจ้งเตือน duplicate
                                     style={[
                                       styles.courseBox,
                                       {
@@ -483,7 +709,11 @@ export default function CartScreen({ student, setView }) {
                                       style={styles.boxCode}
                                       numberOfLines={1}
                                     >
-                                      {item.course_code}
+                                      {/* 🌟 เพิ่ม (T) หรือ (L) ต่อท้ายรหัสวิชา */}
+                                      {item.course_code}{" "}
+                                      {item.section_type
+                                        ? `(${item.section_type})`
+                                        : ""}
                                     </Text>
                                     <Text
                                       style={styles.boxTime}
@@ -503,8 +733,48 @@ export default function CartScreen({ student, setView }) {
                 </ScrollView>
               </View>
 
-              {/* Course Detail List */}
-              <Text style={styles.sectionTitle}>รายละเอียดวิชา</Text>
+              {/* 🌟 4. Course Detail Header พร้อมปุ่มลบรวม */}
+              <View
+                style={{
+                  flexDirection: "row",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginTop: 20,
+                  marginBottom: 10,
+                }}
+              >
+                <Text style={styles.sectionTitle}>รายละเอียดวิชา</Text>
+                {selectedToRemove.length > 0 && (
+                  <TouchableOpacity
+                    onPress={removeMultipleItems}
+                    style={{
+                      backgroundColor: "#E53935",
+                      paddingHorizontal: 12,
+                      paddingVertical: 6,
+                      borderRadius: 8,
+                      flexDirection: "row",
+                      alignItems: "center",
+                    }}
+                  >
+                    <Feather
+                      name="trash-2"
+                      size={16}
+                      color="#FFF"
+                      style={{ marginRight: 4 }}
+                    />
+                    <Text
+                      style={{
+                        color: "#FFF",
+                        fontWeight: "bold",
+                        fontSize: 12,
+                      }}
+                    >
+                      ลบที่เลือก ({selectedToRemove.length})
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
               {items.map((item, idx) => {
                 const dayStr = item.day_of_week || "";
                 const startTime = item.start_time
@@ -514,26 +784,52 @@ export default function CartScreen({ student, setView }) {
                   ? item.end_time.substring(0, 5)
                   : "";
 
-                // 🌟 ดึงค่าจาก API: max_seats (ทั้งหมด) และ enrolled_seats (ลงแล้ว)
                 const maxSeats = item.max_seats || 0;
                 const enrolledSeats = item.enrolled_seats || 0;
-
-                // เช็คว่าเต็มหรือยัง
                 const isFull = enrolledSeats >= maxSeats && maxSeats > 0;
 
+                // 🌟 ID สำหรับเช็คการกดเลือก
+                const itemId = `${item.course_code || item.course_id}|${item.section_type}`;
+                const isSelected = selectedToRemove.includes(itemId);
+
                 return (
-                  <View
+                  <TouchableOpacity
                     key={`${item.course_code || item.course_id}-${item.section_type}-${idx}`}
-                    style={styles.detailCard}
+                    style={[
+                      styles.detailCard,
+                      isSelected && { borderColor: "#a73355", borderWidth: 2 }, // กรอบสีแดงเมื่อเลือก
+                    ]}
+                    activeOpacity={0.8}
+                    onPress={() =>
+                      toggleSelection(
+                        item.course_code || item.course_id,
+                        item.section_type,
+                      )
+                    }
                   >
                     <View style={styles.cardAccent} />
                     <View style={styles.cardBody}>
                       <View style={styles.cardTop}>
-                        <Text style={styles.detailCode}>
-                          {item.course_code || item.course_id} Sec{" "}
-                          {item.section_number || "1"}{" "}
-                          {item.section_type ? `(${item.section_type})` : ""}
-                        </Text>
+                        <View
+                          style={{ flexDirection: "row", alignItems: "center" }}
+                        >
+                          {/* 🌟 แสดงไอคอน Checkbox */}
+                          <MaterialIcons
+                            name={
+                              isSelected
+                                ? "check-box"
+                                : "check-box-outline-blank"
+                            }
+                            size={22}
+                            color={isSelected ? "#a73355" : "#ccc"}
+                            style={{ marginRight: 8 }}
+                          />
+                          <Text style={styles.detailCode}>
+                            {item.course_code || item.course_id} Sec{" "}
+                            {item.section_number || "1"}{" "}
+                            {item.section_type ? `(${item.section_type})` : ""}
+                          </Text>
+                        </View>
                         <Text style={styles.detailTime}>
                           {dayStr && startTime
                             ? `วัน${DAY_MAP[dayStr] || dayStr} ${startTime}-${endTime} น.`
@@ -546,11 +842,14 @@ export default function CartScreen({ student, setView }) {
                           flexDirection: "row",
                           justifyContent: "space-between",
                           alignItems: "center",
+                          marginLeft: 30, // 🌟 เขยิบข้อความให้ตรงหลบ Checkbox
                         }}
                       >
                         <Text style={styles.courseName} numberOfLines={1}>
                           {item.course_name}
                         </Text>
+
+                        {/* 🌟 ปุ่มลบทีละวิชา (ยังคงเก็บไว้เผื่ออยากกดลบแบบเร็วๆ ทีละตัว) */}
                         <TouchableOpacity
                           onPress={() =>
                             removeItem(
@@ -564,7 +863,7 @@ export default function CartScreen({ student, setView }) {
                         </TouchableOpacity>
                       </View>
 
-                      <View style={styles.cardBottom}>
+                      <View style={[styles.cardBottom, { marginLeft: 30 }]}>
                         <Text style={styles.metaText}>
                           {item.credits
                             ? `${item.credits} หน่วยกิต`
@@ -578,7 +877,6 @@ export default function CartScreen({ student, setView }) {
                               : ""}
                         </Text>
 
-                        {/* 🌟 แสดงผลแบบ ลงแล้ว / ทั้งหมด (เช่น 1 / 40) */}
                         <View
                           style={{ flexDirection: "row", alignItems: "center" }}
                         >
@@ -587,7 +885,6 @@ export default function CartScreen({ student, setView }) {
                             style={[
                               styles.metaText,
                               {
-                                // ถ้าเต็มจะขึ้นสีแดง ถ้ายังไม่เต็มจะเป็นสีเขียว/เทาเข้ม
                                 color: isFull ? "#D32F2F" : "#2E7D32",
                                 fontWeight: "bold",
                               },
@@ -609,7 +906,7 @@ export default function CartScreen({ student, setView }) {
                         </View>
                       </View>
                     </View>
-                  </View>
+                  </TouchableOpacity>
                 );
               })}
 
@@ -661,6 +958,199 @@ export default function CartScreen({ student, setView }) {
             <Text style={styles.navText}>SCHEDULE</Text>
           </TouchableOpacity>
         </View>
+        {/* 🌟 โค้ดที่เพิ่มใหม่: หน้าตา Pop-up 🌟 */}
+        <Modal visible={modalConfig.visible} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalBox}>
+              <LinearGradient
+                colors={
+                  modalConfig.type === "success"
+                    ? ["#22c55e", "#16a34a"]
+                    : modalConfig.type === "error"
+                      ? ["#ef4444", "#dc2626"]
+                      : modalConfig.type === "warning"
+                        ? ["#f59e0b", "#d97706"]
+                        : ["#a73355", "#87193e"]
+                }
+                style={styles.modalCircle}
+              >
+                <MaterialIcons
+                  name={
+                    modalConfig.type === "success"
+                      ? "check"
+                      : modalConfig.type === "error"
+                        ? "close"
+                        : modalConfig.type === "warning"
+                          ? "priority-high"
+                          : "help-outline"
+                  }
+                  size={40}
+                  color="white"
+                />
+              </LinearGradient>
+              <Text style={styles.modalTitleText}>{modalConfig.title}</Text>
+              <Text style={styles.modalDescText}>{modalConfig.message}</Text>
+              <View style={styles.modalButtonRow}>
+                {modalConfig.showCancel && (
+                  <TouchableOpacity
+                    style={styles.modalCancelBtn}
+                    onPress={closeModal}
+                  >
+                    <Text style={styles.modalCancelText}>ยกเลิก</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  style={[
+                    styles.modalConfirmBtn,
+                    !modalConfig.showCancel && {
+                      flex: 0,
+                      paddingHorizontal: 50,
+                    },
+                  ]}
+                  onPress={() => {
+                    closeModal();
+                    if (modalConfig.onConfirm) modalConfig.onConfirm();
+                  }}
+                >
+                  <LinearGradient
+                    colors={
+                      modalConfig.type === "error"
+                        ? ["#ef4444", "#dc2626"]
+                        : ["#D23669", "#a73355"]
+                    }
+                    style={styles.modalGradientBtn}
+                  >
+                    <Text style={styles.modalConfirmText}>
+                      {modalConfig.confirmText}
+                    </Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* 🌟 Pop-up สำหรับเปลี่ยน Section อัตโนมัติ (แบบใหม่ รองรับหลายวิชาพร้อมกัน) 🌟 */}
+        <Modal visible={changeSectionModalVisible} transparent animationType="slide">
+          <View style={styles.modalOverlay}>
+            <View style={styles.sectionModalContainer}>
+              
+              <View style={styles.sectionModalHeader}>
+                <View>
+                  <Text style={{ fontSize: 18, fontWeight: "bold", color: "#D32F2F" }}>🚨 ที่นั่งเต็ม!</Text>
+                  <Text style={{ fontSize: 14, color: "#514345", marginTop: 4 }}>พบวิชาในตะกร้าที่ที่นั่งเต็มแล้ว</Text>
+                </View>
+                <TouchableOpacity onPress={() => setChangeSectionModalVisible(false)}>
+                  <MaterialIcons name="close" size={24} color="#837375" />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
+                {adjustments.map((adj, adjIdx) => {
+                  const target = adj.target;
+                  const typeLabel = target.section_type === "T" ? "ทฤษฎี" : "ปฏิบัติ";
+                  
+                  return (
+                    <View key={adjIdx} style={{ marginBottom: 20, borderBottomWidth: adjIdx < adjustments.length - 1 ? 1 : 0, borderBottomColor: "#eee", pb: 16 }}>
+                      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                        <Text style={{ fontSize: 15, fontWeight: "bold", color: "#a73355" }}>
+                          {target.course_code || target.course_id} - {typeLabel}
+                        </Text>
+                        <View style={{ backgroundColor: "#ffebee", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 }}>
+                          <Text style={{ fontSize: 11, color: "#d32f2f" }}>เดิม: วัน{DAY_MAP[target.day_of_week] || target.day_of_week} Sec {target.section_number} เวลา {String(target.start_time).substring(0,5)}-{String(target.end_time).substring(0,5)} น.</Text>
+                        </View>
+                      </View>
+
+                      {adj.alternatives.length > 0 ? (
+                        <View>
+                          <Text style={{ fontSize: 13, color: "#837375", marginBottom: 8 }}>เลือกกลุ่มเรียนใหม่ที่ยังว่าง:</Text>
+                          {adj.alternatives.map((sec, secIdx) => {
+                            const isSelected = adj.selectedNewSection?.section_number === sec.section_number;
+                            return (
+                              <TouchableOpacity
+                                key={secIdx}
+                                style={[
+                                  styles.sectionOptionCard, 
+                                  { paddingVertical: 10, marginBottom: 6 },
+                                  isSelected && { borderColor: "#a73355", backgroundColor: "#fff5f7" }
+                                ]}
+                                onPress={() => updateAdjustmentSelection(adjIdx, sec)}
+                              >
+                                <MaterialIcons 
+                                  name={isSelected ? "radio-button-checked" : "radio-button-unchecked"} 
+                                  size={20} 
+                                  color={isSelected ? "#a73355" : "#ccc"} 
+                                />
+                                <View style={{ marginLeft: 10, flex: 1 }}>
+                                  <Text style={{ fontSize: 14, fontWeight: "bold", color: "#1f1a1c" }}>
+                                    Sec {sec.section_number} ({sec.section_type})
+                                  </Text>
+                                  <Text style={{ fontSize: 11, color: "#837375" }}>
+                                    วัน{DAY_MAP[sec.day_of_week] || sec.day_of_week} {String(sec.start_time).substring(0,5)}-{String(sec.end_time).substring(0,5)} น.
+                                  </Text>
+                                </View>
+                                <View style={{ alignItems: "flex-end" }}>
+                                  <Text style={{ fontSize: 11, color: "#837375" }}>{sec.enrolled_seats}/{sec.max_seats}</Text>
+                                </View>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+                      ) : (
+                        <View style={{ padding: 12, backgroundColor: "#f5f5f5", borderRadius: 8, alignItems: "center" }}>
+                          <Text style={{ fontSize: 13, color: "#d32f2f", fontWeight: "bold" }}>❌ ไม่มีกลุ่มอื่นว่างแล้ว</Text>
+                          <Text style={{ fontSize: 12, color: "#837375", marginTop: 2 }}>กรุณาลบวิชานี้ออกจากตะกร้า</Text>
+                        </View>
+                      )}
+                    </View>
+                  );
+                })}
+              </ScrollView>
+
+              <View style={{ flexDirection: "row", marginTop: 20, gap: 12 }}>
+                <TouchableOpacity 
+                  style={{ flex: 1, backgroundColor: "#f5ebed", paddingVertical: 14, borderRadius: 12, alignItems: "center" }}
+                  onPress={() => setChangeSectionModalVisible(false)}
+                >
+                  <Text style={{ color: "#837375", fontWeight: "bold" }}>ยกเลิก</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={{ 
+                    flex: 1, 
+                    opacity: adjustments.some(a => a.selectedNewSection !== null) ? 1 : 0.5 
+                  }}
+                  disabled={!adjustments.some(a => a.selectedNewSection !== null)}
+                  onPress={handleApplyNewSection}
+                >
+                  <LinearGradient colors={["#a73355", "#7b5455"]} style={{ paddingVertical: 14, borderRadius: 12, alignItems: "center" }}>
+                    <Text style={{ color: "#fff", fontWeight: "bold" }}>ยืนยันการเปลี่ยน</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+
+            </View>
+          </View>
+        </Modal>
+
+        {/* 🌟 Loading Overlay สำหรับป้องกันการกดทับขณะประมวลผล 🌟 */}
+        {loadingCart && (
+          <View 
+            style={{ 
+              position: "absolute", 
+              top: 0, left: 0, right: 0, bottom: 0, 
+              backgroundColor: "rgba(255,255,255,0.7)", 
+              justifyContent: "center", 
+              alignItems: "center", 
+              zIndex: 9999 
+            }}
+          >
+            <View style={{ backgroundColor: "white", padding: 30, borderRadius: 20, elevation: 10, alignItems: "center" }}>
+              <ActivityIndicator size="large" color="#a73355" />
+              <Text style={{ marginTop: 15, fontWeight: "bold", color: "#7b5455" }}>กำลังอัปเดตข้อมูล...</Text>
+            </View>
+          </View>
+        )}
+        
       </SafeAreaView>
     </LinearGradient>
   );
@@ -820,4 +1310,75 @@ const styles = StyleSheet.create({
 
   emptyBox: { alignItems: "center", marginTop: 100 },
   emptyText: { fontSize: 16, color: "#837375", marginTop: 10 },
+
+  // 🌟 โค้ดที่เพิ่มใหม่: CSS ของ Pop-up
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  modalBox: {
+    width: "90%",
+    backgroundColor: "white",
+    borderRadius: 30,
+    padding: 30,
+    alignItems: "center",
+    elevation: 10,
+  },
+  modalCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  modalTitleText: {
+    fontSize: 22,
+    fontWeight: "900",
+    color: "#1f1a1c",
+    marginBottom: 10,
+    textAlign: "center",
+  },
+  modalDescText: {
+    fontSize: 14,
+    color: "#514345",
+    textAlign: "center",
+    marginBottom: 25,
+    lineHeight: 22,
+  },
+  modalButtonRow: {
+    flexDirection: "row",
+    gap: 12,
+    width: "100%",
+    justifyContent: "center",
+  },
+  modalCancelBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    alignItems: "center",
+    borderRadius: 15,
+    backgroundColor: "#F3F4F6",
+  },
+  modalCancelText: { color: "#6B7280", fontWeight: "bold", fontSize: 15 },
+  modalConfirmBtn: { flex: 1, borderRadius: 15, overflow: "hidden" },
+  modalGradientBtn: {
+    paddingVertical: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalConfirmText: { color: "white", fontWeight: "bold", fontSize: 15 },
+
+  /* 🌟 Modal เปลี่ยน Section 🌟 */
+  sectionModalContainer: { width: "100%", backgroundColor: "#ffffff", borderRadius: 24, padding: 24, elevation: 10 },
+  sectionModalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", borderBottomWidth: 1, borderBottomColor: "#f0f0f0", paddingBottom: 12, marginBottom: 12 },
+  sectionOptionCard: { flexDirection: "row", alignItems: "center", backgroundColor: "#fafafa", borderWidth: 1, borderColor: "#f0f0f0", padding: 16, borderRadius: 12, marginBottom: 8 },
+
+  bottomNav: { position: "absolute", bottom: 20, left: 16, right: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: "#ffffff", borderRadius: 40, paddingHorizontal: 8, paddingVertical: 8, elevation: 10, shadowColor: "#a73355", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.1, shadowRadius: 20 },
+  navItem: { alignItems: "center", paddingHorizontal: 8 },
+  navText: { fontSize: 9, fontWeight: "bold", color: "#837375", marginTop: 4 },
+  navItemActive: { alignItems: "center", backgroundColor: "#f5ebed", paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24 },
+  navTextActive: { fontSize: 9, fontWeight: "bold", color: "#a73355", marginTop: 4 },
 });

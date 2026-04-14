@@ -22,6 +22,8 @@ class Student(Base):
     name = Column(String(100))
     faculty = Column(String(100))
     major = Column(String(100))
+    email = Column(String(100))
+    phone_number = Column(String(20))
     curriculum_year = Column(String(4))
     study_plan = Column(String(50))
     avatar_url = Column(String(255))
@@ -142,7 +144,14 @@ class GroupMember(Base):
     has_seen_registered_alert = Column(Boolean, default=False)
 
 
-
+class GradeRecord(Base):
+    __tablename__ = 'grade_record'
+    
+    record_id = Column(Integer, primary_key=True, autoincrement=True)
+    student_id = Column(String(20), ForeignKey('student.student_id', ondelete="CASCADE"))
+    course_id = Column(String(20))
+    grade = Column(String(5))
+    semester = Column(String(10))
 
 def get_db():
     db = SessionLocal()

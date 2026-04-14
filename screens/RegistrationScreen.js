@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
+  Modal, // 🌟 เพิ่ม Modal
 } from "react-native";
 import { MaterialIcons, Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -85,6 +86,29 @@ export default function RegistrationScreen({ student, setView }) {
   const [suggestions, setSuggestions] = useState([]);
   const [calculating, setCalculating] = useState(false);
 
+  // 🌟 State สำหรับ Custom Modal ป็อปอัพสวยๆ
+  const [modalVisible, setModalVisible] = useState(false);
+  const [modalConfig, setModalConfig] = useState({
+    title: "",
+    message: "",
+    type: "info", // "success", "error", "warning", "info"
+    onConfirm: null,
+    confirmText: "ตกลง",
+  });
+
+  // 🌟 ฟังก์ชันเรียกใช้ป็อปอัพแทน Alert.alert
+  const showModal = (title, message, type = "info", onConfirm = null, confirmText = "ตกลง") => {
+    setModalConfig({ title, message, type, onConfirm, confirmText });
+    setModalVisible(true);
+  };
+
+  const handleModalConfirm = () => {
+    setModalVisible(false);
+    if (modalConfig.onConfirm) {
+      modalConfig.onConfirm();
+    }
+  };
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -115,7 +139,8 @@ export default function RegistrationScreen({ student, setView }) {
 
       setSelectedCodes(initialCodes);
     } catch (e) {
-      Alert.alert("ข้อผิดพลาด", e.message);
+      // 🌟 เปลี่ยน Alert เป็น showModal
+      showModal("ข้อผิดพลาด", e.message, "error");
     } finally {
       setLoading(false);
     }
@@ -123,10 +148,12 @@ export default function RegistrationScreen({ student, setView }) {
 
   const toggleCourse = (code) => {
     if (enrolledCourseCodes.includes(code)) {
-      return Alert.alert("ไม่สามารถเลือกได้", "คุณลงทะเบียนวิชานี้ไปแล้ว");
+      // 🌟 เปลี่ยน Alert เป็น showModal
+      return showModal("ไม่สามารถเลือกได้", "คุณลงทะเบียนวิชานี้ไปแล้ว", "warning");
     }
     if (cartCourseCodes.includes(code)) {
-      return Alert.alert("ไม่สามารถเลือกได้", "วิชานี้อยู่ในตะกร้าแล้ว");
+      // 🌟 เปลี่ยน Alert เป็น showModal
+      return showModal("ไม่สามารถเลือกได้", "วิชานี้อยู่ในตะกร้าแล้ว", "warning");
     }
     setSelectedCodes((prev) =>
       prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code],
@@ -135,13 +162,13 @@ export default function RegistrationScreen({ student, setView }) {
 
   const handleGeneratePlans = async () => {
     if (selectedCodes.length === 0)
-      return Alert.alert("แจ้งเตือน", "กรุณาเลือกวิชาเป้าหมาย");
+      return showModal("แจ้งเตือน", "กรุณาเลือกวิชาเป้าหมาย", "warning"); // 🌟 เปลี่ยน Alert เป็น showModal
     setCalculating(true);
     try {
       const result = await aiSuggestAPI(student.student_id, selectedCodes);
       setSuggestions(result || []);
     } catch (err) {
-      Alert.alert("Error", err.message);
+      showModal("Error", err.message, "error"); // 🌟 เปลี่ยน Alert เป็น showModal
     } finally {
       setCalculating(false);
     }
@@ -157,9 +184,11 @@ export default function RegistrationScreen({ student, setView }) {
       const courseNames = fullCourses
         .map((c) => `${c.course_code} (Sec ${c.section_number})`)
         .join(", ");
-      return Alert.alert(
+      // 🌟 เปลี่ยน Alert เป็น showModal
+      return showModal(
         "ไม่สามารถเลือกแผนนี้ได้",
         `วิชาต่อไปนี้ที่นั่งเต็มแล้ว: ${courseNames}\nกรุณาเลือกแผนอื่นหรือกดจัดใหม่`,
+        "error"
       );
     }
 
@@ -173,17 +202,24 @@ export default function RegistrationScreen({ student, setView }) {
 
       const res = await batchAddWithCheckAPI(student.student_id, items);
       if (res.status === "conflict") {
-        Alert.alert(
+        // 🌟 เปลี่ยน Alert เป็น showModal
+        showModal(
           "พบเวลาเรียนชนกัน",
           "กรุณาเคลียร์วิชาในตะกร้าหรือเลือกแผนอื่น",
+          "warning"
         );
       } else {
-        Alert.alert("สำเร็จ", "เพิ่มแผนการเรียนลงตะกร้าเรียบร้อยแล้ว", [
-          { text: "ไปที่ตะกร้า", onPress: () => setView("CART") },
-        ]);
+        // 🌟 เปลี่ยน Alert เป็น showModal พร้อม Callback นำทางไปตะกร้า
+        showModal(
+          "สำเร็จ", 
+          "เพิ่มแผนการเรียนลงตะกร้าเรียบร้อยแล้ว", 
+          "success", 
+          () => setView("CART"), 
+          "ไปที่ตะกร้า"
+        );
       }
     } catch (e) {
-      Alert.alert("ข้อผิดพลาด", e.message);
+      showModal("ข้อผิดพลาด", e.message, "error"); // 🌟 เปลี่ยน Alert เป็น showModal
     } finally {
       setCalculating(false);
     }
@@ -223,9 +259,46 @@ export default function RegistrationScreen({ student, setView }) {
     };
   };
 
+  // 🌟 ฟังก์ชันเลือกไอคอนและสีตามประเภทป็อปอัพ
+  const getModalStyleConfig = () => {
+    switch (modalConfig.type) {
+      case "success": return { icon: "check-circle", color: "#4CAF50", bgColor: "#E8F5E9" };
+      case "error": return { icon: "x-circle", color: "#F44336", bgColor: "#FFEBEE" };
+      case "warning": return { icon: "alert-triangle", color: "#FF9800", bgColor: "#FFF3E0" };
+      default: return { icon: "info", color: "#2196F3", bgColor: "#E3F2FD" };
+    }
+  };
+
+  const modalStyle = getModalStyleConfig();
+
   return (
     <LinearGradient colors={["#FFDAE4", "#FFF8F8"]} style={styles.container}>
       <SafeAreaView style={{ flex: 1 }}>
+
+        {/* 🌟 Custom Modal ป็อปอัพสวยๆ แทรกตรงนี้ */}
+        <Modal
+          animationType="fade"
+          transparent={true}
+          visible={modalVisible}
+          onRequestClose={() => setModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={[styles.modalIconBg, { backgroundColor: modalStyle.bgColor }]}>
+                <Feather name={modalStyle.icon} size={32} color={modalStyle.color} />
+              </View>
+              <Text style={styles.modalTitle}>{modalConfig.title}</Text>
+              <Text style={styles.modalMessage}>{modalConfig.message}</Text>
+              <TouchableOpacity
+                style={[styles.modalButton, { backgroundColor: modalStyle.color }]}
+                onPress={handleModalConfirm}
+              >
+                <Text style={styles.modalButtonText}>{modalConfig.confirmText}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
         <View style={styles.header}>
           <TouchableOpacity
             onPress={() => setView("MENU")}
@@ -233,7 +306,7 @@ export default function RegistrationScreen({ student, setView }) {
           >
             <MaterialIcons name="arrow-back" size={24} color="#7b5455" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>ลงทะเบียนยกภาค (AI)</Text>
+          <Text style={styles.headerTitle}>ลงทะเบียนยกภาค</Text>
           <TouchableOpacity onPress={fetchData}>
             <MaterialIcons name="refresh" size={24} color="#a73355" />
           </TouchableOpacity>
@@ -576,7 +649,7 @@ export default function RegistrationScreen({ student, setView }) {
                           size={24}
                           color={
                             isLocked
-                              ? "#E53935"
+                              ? "#ff0000"
                               : isSelected
                                 ? "#FFF"
                                 : "#a73355"
@@ -593,7 +666,7 @@ export default function RegistrationScreen({ student, setView }) {
                               style={[
                                 styles.courseCode,
                                 (isSelected || isLocked) && {
-                                  color: isLocked ? "#E53935" : "#FFF",
+                                  color: isLocked ? "#D23669" : "#FFF",
                                 },
                               ]}
                             >
@@ -630,7 +703,7 @@ export default function RegistrationScreen({ student, setView }) {
                             style={[
                               styles.courseCode,
                               (isSelected || isLocked) && {
-                                color: isLocked ? "#E53935" : "#FFF",
+                                color: isLocked ? "#D23669" : "#FFF",
                                 fontSize: 12,
                               },
                             ]}
@@ -666,7 +739,7 @@ export default function RegistrationScreen({ student, setView }) {
                   disabled={calculating}
                 >
                   <LinearGradient
-                    colors={["#a73355", "#7b1d3a"]}
+                    colors={["#D23669", "#D23669"]}
                     style={styles.generateGradient}
                   >
                     {calculating ? (
@@ -866,4 +939,58 @@ const styles = StyleSheet.create({
   acceptBtn: { marginTop: 10, borderRadius: 20, overflow: "hidden" },
   acceptGradient: { paddingVertical: 12, alignItems: "center" },
   acceptBtnText: { color: "white", fontWeight: "bold", fontSize: 14 },
+
+  // 🌟 สไตล์สำหรับ Custom Modal ป็อปอัพสวยๆ
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalContent: {
+    width: width * 0.85,
+    backgroundColor: "white",
+    borderRadius: 24,
+    padding: 24,
+    alignItems: "center",
+    elevation: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+  },
+  modalIconBg: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#1f1a1c",
+    marginBottom: 8,
+    textAlign: "center",
+  },
+  modalMessage: {
+    fontSize: 15,
+    color: "#837375",
+    textAlign: "center",
+    marginBottom: 24,
+    lineHeight: 22,
+  },
+  modalButton: {
+    width: "100%",
+    height: 48,
+    borderRadius: 14,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalButtonText: {
+    color: "white",
+    fontWeight: "bold",
+    fontSize: 16,
+  },
 });

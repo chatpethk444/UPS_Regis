@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Dimensions,
   Alert,
+  Modal, // 🌟 เพิ่ม Modal ตรงนี้
 } from "react-native";
 import { MaterialIcons, Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -76,6 +77,17 @@ export default function ScheduleScreen({ student, setView }) {
   // 🌟 2. เพิ่ม State สำหรับเก็บวิชาที่เลือกถอน
   const [selectedToWithdraw, setSelectedToWithdraw] = useState([]);
 
+  // 🌟 State สำหรับ Custom Modal
+  const [modalVisible, setModalVisible] = useState(false);
+  const [pendingWithdraw, setPendingWithdraw] = useState(null);
+  
+  // 🌟 เพิ่ม State จัดการรูปแบบการแสดงผลของ Modal (Confirm, Success, Error)
+  const [modalConfig, setModalConfig] = useState({
+    type: "confirm", // "confirm", "success", "error"
+    title: "",
+    message: ""
+  });
+
   useEffect(() => {
     if (student) fetchSchedule();
   }, []);
@@ -110,68 +122,37 @@ export default function ScheduleScreen({ student, setView }) {
           return `${h}:${m}`;
         };
 
-        const mergedSchedule = data.reduce((acc, curr) => {
+        // 🌟 แก้ไข: ไม่ต้องใช้ reduce เพื่อรวม (Merge) แล้ว ให้ใช้ map สร้าง Array ใหม่ไปเลย
+        const processedSchedule = data.map((curr) => {
           const dayCurr = curr.day_of_week || curr.class_times?.[0]?.day;
+          const startCurr = parseTime(curr.start_time || curr.class_times?.[0]?.start);
+          const endCurr = parseTime(curr.end_time || curr.class_times?.[0]?.end);
 
-          const startCurr = parseTime(
-            curr.start_time || curr.class_times?.[0]?.start,
-          );
-          const endCurr = parseTime(
-            curr.end_time || curr.class_times?.[0]?.end,
-          );
-
-          let currentType =
-            curr.section_type || curr.type || curr.class_times?.[0]?.type;
+          let currentType = curr.section_type || curr.type || curr.class_times?.[0]?.type;
           if (!currentType) {
             currentType = endCurr - startCurr > 120 ? "L" : "T";
           }
 
-          const existingIdx = acc.findIndex((item) => {
-            const dayItem = item.day_of_week || item.class_times?.[0]?.day;
-            const isSameCourseAndDay =
-              item.course_code === curr.course_code &&
-              (dayItem === dayCurr || DAY_MAP[dayItem] === DAY_MAP[dayCurr]);
+          return {
+            ...curr,
+            day_of_week: dayCurr,
+            start_time: formatTime(startCurr),
+            end_time: formatTime(endCurr),
+            section_type: currentType, // T หรือ L แยกกันชัดเจน
+            _startMins: startCurr, // เก็บไว้ใช้ตอน Sort
+          };
+        });
 
-            if (isSameCourseAndDay) {
-              const startEx = parseTime(
-                item.start_time || item.class_times?.[0]?.start,
-              );
-              const endEx = parseTime(
-                item.end_time || item.class_times?.[0]?.end,
-              );
-              return startCurr <= endEx + 15 && endCurr >= startEx - 15;
-            }
-            return false;
-          });
-
-          if (existingIdx !== -1) {
-            const ex = acc[existingIdx];
-            const startEx = parseTime(
-              ex.start_time || ex.class_times?.[0]?.start,
-            );
-            const endEx = parseTime(ex.end_time || ex.class_times?.[0]?.end);
-
-            ex.start_time = formatTime(Math.min(startEx, startCurr));
-            ex.end_time = formatTime(Math.max(endEx, endCurr));
-
-            const type1 = ex.section_type || "T";
-            if (!type1.includes(currentType))
-              ex.section_type = `${type1}+${currentType}`;
-          } else {
-            acc.push({ ...curr, section_type: currentType });
-          }
-          return acc;
-        }, []);
-
-        mergedSchedule.sort((a, b) => {
+        // 🌟 เรียงลำดับตามวันและเวลาเริ่มเรียน
+        processedSchedule.sort((a, b) => {
           const dayA = DAY_ORDER[a.day_of_week] || 99;
           const dayB = DAY_ORDER[b.day_of_week] || 99;
 
           if (dayA !== dayB) return dayA - dayB;
-          return parseTime(a.start_time) - parseTime(b.start_time);
+          return a._startMins - b._startMins;
         });
 
-        setSchedule(mergedSchedule);
+        setSchedule(processedSchedule);
       } else {
         setSchedule([]);
       }
@@ -216,9 +197,10 @@ export default function ScheduleScreen({ student, setView }) {
     return `${str}.00`;
   };
 
-  // 🌟 3. ฟังก์ชัน Toggle Checkbox
-  const toggleSelection = (courseCode, sectionType) => {
-    const id = `${courseCode}|${sectionType}`;
+  // 🌟 1. แก้ไขฟังก์ชัน Toggle Checkbox ให้จำ section_number ด้วย
+  const toggleSelection = (courseCode, sectionNumber, sectionType) => {
+    // เพิ่ม sectionNumber เข้าไปใน ID
+    const id = `${courseCode}|${sectionNumber}|${sectionType}`;
     if (selectedToWithdraw.includes(id)) {
       setSelectedToWithdraw((prev) => prev.filter((item) => item !== id));
     } else {
@@ -226,79 +208,122 @@ export default function ScheduleScreen({ student, setView }) {
     }
   };
 
-  // 🌟 4. ฟังก์ชันส่งคำสั่งถอนรายวิชาแบบเลือกทีละหลายตัว
-  const handleWithdrawMultiple = () => {
-    if (selectedToWithdraw.length === 0) return;
-
-    Alert.alert(
-      "ถอนรายวิชา",
-      `ต้องการถอน ${selectedToWithdraw.length} รายการที่เลือกออกจากตารางเรียนหรือไม่?`,
-      [
-        { text: "ยกเลิก", style: "cancel" },
-        {
-          text: "ยืนยันถอน",
-          style: "destructive",
-          onPress: async () => {
-            setLoading(true);
-            try {
-              const promises = [];
-              selectedToWithdraw.forEach((id) => {
-                const [code, combinedType] = id.split("|");
-                const types = combinedType.split("+"); // เผื่อกรณีวิชาโดนยุบเป็น T+L ให้แยกส่งไปถอน
-                types.forEach((type) => {
-                  promises.push(
-                    withdrawCourseAPI(student.student_id, code, type),
-                  );
-                });
-              });
-
-              await Promise.all(promises);
-              Alert.alert("สำเร็จ", "ถอนรายวิชาเรียบร้อยแล้ว");
-              fetchSchedule(); // โหลดตารางใหม่
-            } catch (e) {
-              Alert.alert("ข้อผิดพลาด", e.message);
-              setLoading(false);
-            }
-          },
-        },
-      ],
-    );
+  // 🌟 ฟังก์ชันสำหรับเปิด Modal ยืนยันการถอน
+  const confirmWithdraw = (type, data = null) => {
+    setPendingWithdraw({ type, data });
+    setModalConfig({
+      type: "confirm",
+      title: "ยืนยันการถอน",
+      message: type === "multiple" 
+        ? `คุณต้องการถอนวิชาที่เลือกทั้งหมด (${selectedToWithdraw.length} รายการ) ใช่หรือไม่?`
+        : `คุณต้องการถอนวิชา ${data.code} (Sec ${data.secNum}) ใช่หรือไม่?`
+    });
+    setModalVisible(true);
   };
 
-  // 🌟 5. ฟังก์ชันส่งคำสั่งถอนแบบตัวเดียว (กดผ่านถังขยะ)
-  const handleWithdrawSingle = (courseCode, combinedType) => {
-    Alert.alert(
-      "ถอนรายวิชา",
-      `ต้องการถอนวิชา ${courseCode} ออกจากตารางเรียนหรือไม่?`,
-      [
-        { text: "ยกเลิก", style: "cancel" },
-        {
-          text: "ยืนยันถอน",
-          style: "destructive",
-          onPress: async () => {
-            setLoading(true);
-            try {
-              const types = combinedType.split("+");
-              const promises = types.map((type) =>
-                withdrawCourseAPI(student.student_id, courseCode, type),
-              );
+  // 🌟 2. แก้ไขการสั่งทำงานของปุ่มยืนยัน
+  const executeWithdraw = async () => {
+    setModalVisible(false);
+    setLoading(true);
+    try {
+      const { type, data } = pendingWithdraw;
+      const promises = [];
 
-              await Promise.all(promises);
-              Alert.alert("สำเร็จ", "ถอนรายวิชาเรียบร้อยแล้ว");
-              fetchSchedule();
-            } catch (e) {
-              Alert.alert("ข้อผิดพลาด", e.message);
-              setLoading(false);
-            }
-          },
-        },
-      ],
-    );
+      if (type === "multiple") {
+        selectedToWithdraw.forEach((id) => {
+          // แตก string ออกมา 3 ค่า
+          const [code, secNum, secType] = id.split("|");
+          // ส่งค่า secNum ไปให้ API ด้วย
+          promises.push(withdrawCourseAPI(student.student_id, code, secNum, secType));
+        });
+      } else {
+        const { code, secNum, combinedType } = data;
+        promises.push(withdrawCourseAPI(student.student_id, code, secNum, combinedType));
+      }
+
+      await Promise.all(promises);
+      
+      setModalConfig({
+        type: "success",
+        title: "สำเร็จ",
+        message: "ถอนรายวิชาเรียบร้อยแล้ว"
+      });
+      setModalVisible(true);
+      
+      fetchSchedule(); // โหลดตารางใหม่
+    } catch (e) {
+      setModalConfig({
+        type: "error",
+        title: "ข้อผิดพลาด",
+        message: e.message
+      });
+      setModalVisible(true);
+      setLoading(false);
+    }
   };
 
   return (
     <LinearGradient colors={["#FFDAE4", "#FFF8F8"]} style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
+        
+        {/* 🌟 Custom Modal ป็อปอัพที่แก้ไขให้ปุ่มไม่หายแล้ว */}
+        <Modal
+          animationType="fade"
+          transparent={true}
+          visible={modalVisible}
+          onRequestClose={() => setModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              
+              {/* เปลี่ยนไอคอนและสีพื้นหลังตามสถานะ */}
+              <View style={[
+                styles.modalIconBg, 
+                { backgroundColor: modalConfig.type === 'success' ? '#E8F5E9' : '#FFEBEE' }
+              ]}>
+                <Feather 
+                  name={modalConfig.type === 'success' ? "check-circle" : modalConfig.type === 'error' ? "x-circle" : "alert-triangle"} 
+                  size={32} 
+                  color={modalConfig.type === 'success' ? "#4CAF50" : "#E53935"} 
+                />
+              </View>
+              
+              <Text style={styles.modalTitle}>{modalConfig.title}</Text>
+              <Text style={styles.modalMessage}>{modalConfig.message}</Text>
+              
+              {/* 🌟 แก้ไขตรงนี้: ใส่ปุ่มลงใน Container เสมอ เพื่อไม่ให้ flex: 1 บีบปุ่มจนหายไป */}
+              {modalConfig.type === "confirm" ? (
+                <View style={styles.modalButtonContainer}>
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.cancelButton]}
+                    onPress={() => setModalVisible(false)}
+                  >
+                    <Text style={styles.cancelButtonText}>ยกเลิก</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.confirmButton]}
+                    onPress={executeWithdraw}
+                  >
+                    <Text style={styles.confirmButtonText}>ยืนยันถอน</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.modalButtonContainer}>
+                  <TouchableOpacity
+                    style={[styles.modalButton, { 
+                      backgroundColor: modalConfig.type === 'success' ? '#4CAF50' : '#E53935'
+                    }]}
+                    onPress={() => setModalVisible(false)}
+                  >
+                    <Text style={styles.confirmButtonText}>ตกลง</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+              
+            </View>
+          </View>
+        </Modal>
+
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity
@@ -459,7 +484,7 @@ export default function ScheduleScreen({ student, setView }) {
                 <Text style={styles.sectionTitle}>รายละเอียดวิชา</Text>
                 {selectedToWithdraw.length > 0 && (
                   <TouchableOpacity
-                    onPress={handleWithdrawMultiple}
+                    onPress={() => confirmWithdraw("multiple")}
                     style={{
                       backgroundColor: "#E53935",
                       paddingHorizontal: 12,
@@ -490,17 +515,16 @@ export default function ScheduleScreen({ student, setView }) {
 
               {/* 📝 รายละเอียดวิชาด้านล่างแบบเลือกถอนได้ */}
               {schedule.map((item, idx) => {
+                // 🌟 แก้ไข: ลอจิกแสดงชื่อประเภทเรียน ปรับให้ไม่ต้องเช็ค T+L รวมกันแล้ว
                 let typeLabel = "ทฤษฎี";
-                if (
-                  item.section_type?.includes("T") &&
-                  item.section_type?.includes("L")
-                ) {
-                  typeLabel = "ทฤษฎีและปฏิบัติ";
-                } else if (item.section_type?.includes("L")) {
+                if (item.section_type === "L" || item.section_type?.includes("L")) {
                   typeLabel = "ปฏิบัติ";
+                } else if (item.section_type === "T" || item.section_type?.includes("T")) {
+                  typeLabel = "ทฤษฎี";
                 }
 
-                const itemId = `${item.course_code}|${item.section_type}`;
+                // 🌟 เพิ่ม item.section_number เข้าไปใน itemId
+                const itemId = `${item.course_code}|${item.section_number}|${item.section_type}`;
                 const isSelected = selectedToWithdraw.includes(itemId);
 
                 return (
@@ -512,22 +536,15 @@ export default function ScheduleScreen({ student, setView }) {
                     ]}
                     activeOpacity={0.8}
                     onPress={() =>
-                      toggleSelection(item.course_code, item.section_type)
+                    toggleSelection(item.course_code, item.section_number, item.section_type)
                     }
                   >
                     <View style={styles.cardAccent} />
                     <View style={styles.cardBody}>
                       <View style={styles.cardTop}>
-                        <View
-                          style={{ flexDirection: "row", alignItems: "center" }}
-                        >
-                          {/* 🌟 Checkbox */}
+                        <View style={{ flexDirection: "row", alignItems: "center" }}>
                           <MaterialIcons
-                            name={
-                              isSelected
-                                ? "check-box"
-                                : "check-box-outline-blank"
-                            }
+                            name={isSelected ? "check-box" : "check-box-outline-blank"}
                             size={22}
                             color={isSelected ? "#a73355" : "#ccc"}
                             style={{ marginRight: 8 }}
@@ -558,10 +575,11 @@ export default function ScheduleScreen({ student, setView }) {
                         {/* 🌟 ปุ่มถังขยะสำหรับถอนรายวิชาแบบตัวเดียว */}
                         <TouchableOpacity
                           onPress={() =>
-                            handleWithdrawSingle(
-                              item.course_code,
-                              item.section_type,
-                            )
+                            confirmWithdraw("single", {
+                              code: item.course_code,
+                              secNum: item.section_number,
+                              combinedType: item.section_type,
+                            })
                           }
                           style={{ padding: 4 }}
                         >
@@ -569,13 +587,11 @@ export default function ScheduleScreen({ student, setView }) {
                         </TouchableOpacity>
                       </View>
 
-                      {/* 👇 แทรกชื่ออาจารย์ใน View นี้ 👇 */}
                       <View style={[styles.cardBottom, { marginLeft: 30 }]}>
                         <Text style={styles.metaText}>
                           กลุ่ม: {item.section_number} {typeLabel}
                         </Text>
 
-                        {/* 🌟 เพิ่มชื่ออาจารย์ตรงนี้ครับ */}
                         <Text style={styles.metaText}>
                           ห้อง {item.room || "N/A"}
                         </Text>
@@ -775,5 +791,74 @@ const styles = StyleSheet.create({
     color: "#837375",
     marginTop: 4,
     letterSpacing: 0.5,
+  },
+
+  // 🌟 สไตล์สำหรับ Custom Modal (ป็อปอัพสวยๆ)
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalContent: {
+    width: width * 0.85,
+    backgroundColor: "white",
+    borderRadius: 24,
+    padding: 24,
+    alignItems: "center",
+    elevation: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+  },
+  modalIconBg: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#1f1a1c",
+    marginBottom: 8,
+    textAlign: "center",
+  },
+  modalMessage: {
+    fontSize: 15,
+    color: "#837375",
+    textAlign: "center",
+    marginBottom: 24,
+    lineHeight: 22,
+  },
+  modalButtonContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    width: "100%",
+  },
+  modalButton: {
+    flex: 1,
+    height: 48,
+    borderRadius: 14,
+    justifyContent: "center",
+    alignItems: "center",
+    marginHorizontal: 6,
+  },
+  cancelButton: {
+    backgroundColor: "#F5F5F5",
+  },
+  cancelButtonText: {
+    color: "#837375",
+    fontWeight: "600",
+  },
+  confirmButton: {
+    backgroundColor: "#E53935",
+  },
+  confirmButtonText: {
+    color: "white",
+    fontWeight: "bold",
   },
 });

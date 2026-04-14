@@ -1,7 +1,7 @@
 // api.js — จุดเดียวสำหรับ call ทุก API
 // ✅ แก้ IP ที่นี่ที่เดียว ไม่ต้องแก้ทุกไฟล์
 
-export const BASE_URL = "http://10.63.164.135:8000";
+export const BASE_URL = "http://10.175.15.135:8000"; // ชี้ไปที่ Backend ตรงกัน
 //export const BASE_URL = "http://localhost:8000";
 // สำหรับเครื่องจริง: เปลี่ยนเป็น IP เครื่องคอม เช่น "http://192.168.1.x:8000"
 
@@ -51,20 +51,45 @@ export const getZOptionsAPI = (student_id, z_course_code) =>
   apiFetch(`/z-options/${student_id}/${z_course_code}`);
 
 // --- Cart ---
-export const getCartAPI = (student_id) => apiFetch(`/cart/${student_id}`);
+// 🌟 เพิ่ม ?t=เวลาปัจจุบัน และใส่ Cache-Control
+export const getCartAPI = (student_id) =>
+  apiFetch(`/cart/${student_id}?t=${new Date().getTime()}`, { 
+    method: "GET",
+    headers: { "Cache-Control": "no-cache" }
+  });
 
-export const addToCartAPI = (student_id, course_code, section_number) =>
+
+
+export const addToCartAPI = (student_id, course_code, section_number, section_type) =>
   apiFetch("/cart/add", {
     method: "POST",
-    body: JSON.stringify({ student_id, course_code, section_number }),
+    body: JSON.stringify({ 
+      student_id: String(student_id), 
+      course_code: String(course_code), 
+      section_number: String(section_number), // 🌟 แปลงเลข 1 เป็น "1" ป้องกัน 422
+      section_type: section_type ? String(section_type) : "T" 
+    }),
   });
+
+  // ดึงข้อมูล Section ทั้งหมดของวิชานั้นๆ
+export const getCourseSectionsAPI = async (courseCode) => {
+  // สมมติว่า Backend URL ของคุณคือ /courses/{courseCode}/sections
+  // 💡(ถ้า URL หลังบ้านคุณตั้งเป็นแบบอื่น ให้เปลี่ยนตรงนี้ให้ตรงกันนะครับ)
+  return apiFetch(`/courses/${courseCode}/sections`, { 
+    method: "GET" 
+  });
+};
 
 // แก้จากของเดิมเป็นแบบนี้
 export const removeFromCartAPI = (student_id, course_code, section_type) =>
-  apiFetch(
-    `/cart/remove/${student_id}/${course_code}?section_type=${section_type || ""}`,
-    { method: "DELETE" },
-  );
+  apiFetch("/cart/remove", {
+    method: "POST",
+    body: JSON.stringify({ 
+      student_id: String(student_id), 
+      course_code: String(course_code),
+      section_type: section_type ? String(section_type) : "T"
+    }),
+  });
 
 // --- Enrollment ---
 export const confirmEnrollmentAPI = (student_id) =>
@@ -134,29 +159,18 @@ export const batchAddWithCheckAPI = (student_id, items) =>
     body: JSON.stringify({ student_id, items }),
   });
 
-export const withdrawCourseAPI = async (studentId, courseCode, sectionType) => {
-  try {
-    const response = await fetch(`${BASE_URL}/enrollment/withdraw`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        student_id: studentId,
-        course_code: courseCode,
-        section_type: sectionType,
-      }),
-    });
+// เพิ่มที่ไฟล์ api.js
+export const getStudentGradesAPI = (student_id) =>
+  apiFetch(`/grades/${student_id}`, { method: "GET" });
 
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.message || "เกิดข้อผิดพลาดในการถอนรายวิชา");
-    }
-
-    return data;
-  } catch (error) {
-    console.error("Error withdrawing course:", error);
-    throw error;
-  }
-};
+// --- Withdraw Course ---
+export const withdrawCourseAPI = (student_id, course_code, section_number, section_type) =>
+  apiFetch("/enrollment/withdraw", {
+    method: "POST",
+    body: JSON.stringify({ 
+      student_id, 
+      course_code, 
+      section_number, 
+      section_type 
+    }),
+  });

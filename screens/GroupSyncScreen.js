@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Image,
   Dimensions,
+  Modal, // 🌟 เพิ่ม Modal ตรงนี้
 } from "react-native";
 import { MaterialIcons, Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -50,6 +51,29 @@ export default function GroupSyncScreen({ student, setView }) {
   const [groupInfo, setGroupInfo] = useState(null);
   const [prevStatus, setPrevStatus] = useState(null);
 
+  // 🌟 State สำหรับ Custom Modal ป็อปอัพสวยๆ
+  const [modalVisible, setModalVisible] = useState(false);
+  const [modalConfig, setModalConfig] = useState({
+    type: "info", // "success", "error", "warning", "confirm"
+    title: "",
+    message: "",
+    onConfirm: null,
+    confirmText: "ตกลง",
+  });
+
+  // 🌟 ฟังก์ชันเรียกใช้ป็อปอัพ
+  const showModal = (title, message, type = "info", onConfirm = null, confirmText = "ตกลง") => {
+    setModalConfig({ title, message, type, onConfirm, confirmText });
+    setModalVisible(true);
+  };
+
+  const handleModalConfirm = () => {
+    setModalVisible(false);
+    if (modalConfig.onConfirm) {
+      modalConfig.onConfirm();
+    }
+  };
+
   useEffect(() => {
     loadInitialData();
     const interval = setInterval(fetchMyGroup, 5000); 
@@ -73,23 +97,24 @@ export default function GroupSyncScreen({ student, setView }) {
 
       // Detect if kicked
       if (prevStatus === "APPROVED" && (!hasGroup || !myMember)) {
-        Alert.alert("แจ้งเตือน", "คุณถูกนำออกจากกลุ่มแล้ว");
+        showModal("แจ้งเตือน", "คุณถูกนำออกจากกลุ่มแล้ว", "warning"); // 🌟 ใช้ Modal
       }
       setPrevStatus(currentStatus);
 
       // 🌟 แก้เรื่อง Alert ซ้ำ: เช็ค hasSeenAlert จาก DB
       if (currentLastAction === "REGISTERED" && !hasSeenAlert) {
-        Alert.alert("สำเร็จ", "หัวหน้ากลุ่มลงทะเบียนให้ทุกคนเรียบร้อยแล้ว!", [
-          { 
-            text: "ไปดูตารางเรียน", 
-            onPress: async () => {
-              try {
-                await markSeenRegisteredAPI(student.student_id);
-                setView("SCHEDULE");
-              } catch (e) { console.log(e); }
-            } 
-          }
-        ]);
+        showModal(
+          "สำเร็จ",
+          "หัวหน้ากลุ่มลงทะเบียนให้ทุกคนเรียบร้อยแล้ว!",
+          "success",
+          async () => {
+            try {
+              await markSeenRegisteredAPI(student.student_id);
+              setView("SCHEDULE");
+            } catch (e) { console.log(e); }
+          },
+          "ไปดูตารางเรียน"
+        ); // 🌟 ใช้ Modal
       }
     }
   }, [groupInfo]);
@@ -115,21 +140,21 @@ export default function GroupSyncScreen({ student, setView }) {
       await createGroupAPI(student.student_id);
       await fetchMyGroup();
     } catch (e) {
-      Alert.alert("ข้อผิดพลาด", e.message);
+      showModal("ข้อผิดพลาด", e.message, "error"); // 🌟 ใช้ Modal
     } finally {
       setLoading(false);
     }
   };
 
   const handleJoinGroup = async () => {
-    if (!groupCode.trim()) return Alert.alert("แจ้งเตือน", "กรุณากรอกรหัสกลุ่ม");
+    if (!groupCode.trim()) return showModal("แจ้งเตือน", "กรุณากรอกรหัสกลุ่ม", "warning"); // 🌟 ใช้ Modal
     setLoading(true);
     try {
       await joinGroupAPI(student.student_id, groupCode.trim().toUpperCase());
-      Alert.alert("ส่งคำขอแล้ว", "รอหัวหน้ากลุ่มกดยืนยันนะครับ");
+      showModal("ส่งคำขอแล้ว", "รอหัวหน้ากลุ่มกดยืนยันนะครับ", "success"); // 🌟 ใช้ Modal
       fetchMyGroup();
     } catch (e) {
-      Alert.alert("ข้อผิดพลาด", e.message);
+      showModal("ข้อผิดพลาด", e.message, "error"); // 🌟 ใช้ Modal
     } finally {
       setLoading(false);
     }
@@ -137,20 +162,23 @@ export default function GroupSyncScreen({ student, setView }) {
 
   const handleApprove = async (target_id, action) => {
     if (action === "REJECT") {
-      Alert.alert("ยืนยัน", "ต้องการลบสมาชิกคนนี้ใช่หรือไม่?", [
-        { text: "ยกเลิก", style: "cancel" },
-        { text: "ลบออก", style: "destructive", onPress: async () => {
+      showModal(
+        "ยืนยัน",
+        "ต้องการลบสมาชิกคนนี้ใช่หรือไม่?",
+        "confirm",
+        async () => {
           try {
             await approveMemberAPI(student.student_id, target_id, action);
             fetchMyGroup();
-          } catch (e) { Alert.alert("Error", e.message); }
-        }}
-      ]);
+          } catch (e) { showModal("Error", e.message, "error"); }
+        },
+        "ลบออก"
+      ); // 🌟 ใช้ Modal
     } else {
       try {
         await approveMemberAPI(student.student_id, target_id, action);
         fetchMyGroup();
-      } catch (e) { Alert.alert("Error", e.message); }
+      } catch (e) { showModal("Error", e.message, "error"); } // 🌟 ใช้ Modal
     }
   };
 
@@ -172,37 +200,36 @@ export default function GroupSyncScreen({ student, setView }) {
             } ที่นั่ง)`,
         )
         .join(", ");
-      return Alert.alert(
+      return showModal(
         "ที่นั่งไม่เพียงพอ",
         `วิชาต่อไปนี้มีที่นั่งไม่พอสำหรับสมาชิกทั้ง ${memberCount} คน: ${names}\nกรุณาเปลี่ยนกลุ่มเรียนในตะกร้าของคุณก่อน Sync ให้เพื่อน`,
-      );
+        "error"
+      ); // 🌟 ใช้ Modal
     }
 
-    Alert.alert(
+    showModal(
       "ยืนยันการ Sync รายวิชา",
       "ระบบจะคัดลอกตะกร้าของคุณไปใส่ให้เพื่อนแทน และตรวจสอบวิชาซ้ำ/ชนเวลา ยืนยันหรือไม่?",
-      [
-        { text: "ยกเลิก", style: "cancel" },
-        {
-          text: "ยืนยัน Sync",
-          onPress: async () => {
-            setLoading(true);
-            try {
-              const res = await syncGroupCartAPI(student.student_id);
-              Alert.alert(
-                "สำเร็จ!",
-                res.message || "อัปเดตวิชาให้เพื่อนทุกคนแล้ว",
-              );
-              fetchMyGroup();
-            } catch (e) {
-              Alert.alert("ไม่สามารถ Sync ได้", e.message);
-            } finally {
-              setLoading(false);
-            }
-          },
-        },
-      ],
-    );
+      "confirm",
+      async () => {
+        setLoading(true);
+        try {
+          const res = await syncGroupCartAPI(student.student_id);
+          showModal(
+            "สำเร็จ!",
+            res.message || "อัปเดตวิชาให้เพื่อนทุกคนแล้ว",
+            "success"
+          ); // 🌟 แสดง Modal ซ้อนเมื่อเสร็จ
+          fetchMyGroup();
+        } catch (e) {
+          // หน่วงเวลานิดนึงเพื่อให้ Modal แรกปิดสนิทก่อนเปิดอันที่สอง (แก้บั๊กแสดงผลซ้อน)
+          setTimeout(() => showModal("ไม่สามารถ Sync ได้", e.message, "error"), 500); 
+        } finally {
+          setLoading(false);
+        }
+      },
+      "ยืนยัน Sync"
+    ); // 🌟 ใช้ Modal
   };
 
   const handleRegisterGroup = () => {
@@ -223,47 +250,43 @@ export default function GroupSyncScreen({ student, setView }) {
             } ที่นั่ง)`,
         )
         .join(", ");
-      return Alert.alert(
+      return showModal(
         "ที่นั่งไม่เพียงพอ",
         `วิชาต่อไปนี้มีที่นั่งไม่พอสำหรับสมาชิกทั้ง ${memberCount} คน: ${names}\nกรุณาเปลี่ยนกลุ่มเรียนก่อนกดยืนยัน`,
-      );
+        "error"
+      ); // 🌟 ใช้ Modal
     }
 
-    Alert.alert(
+    showModal(
       "ยืนยันการลงทะเบียน",
       "จะทำการลงทะเบียนวิชาในตะกร้าให้ทุกคน ยืนยันหรือไม่?",
-      [
-        { text: "ยกเลิก", style: "cancel" },
-        {
-          text: "ยืนยัน",
-          onPress: async () => {
-            setLoading(true);
-            try {
-              // 1. เรียก API ลงทะเบียนรายวิชา
-              await registerGroupAllAPI(student.student_id);
+      "confirm",
+      async () => {
+        setLoading(true);
+        try {
+          // 1. เรียก API ลงทะเบียนรายวิชา
+          await registerGroupAllAPI(student.student_id);
 
-              Alert.alert(
-                "สำเร็จ",
-                "ลงทะเบียนให้ทุกคนเรียบร้อยแล้ว! สมาชิกคนอื่นจะได้รับการแจ้งเตือนทันที",
-                [
-                  {
-                    text: "ไปดูตารางเรียน",
-                    onPress: () => setView("SCHEDULE"),
-                  },
-                ],
-              );
+          setTimeout(() => {
+            showModal(
+              "สำเร็จ",
+              "ลงทะเบียนให้ทุกคนเรียบร้อยแล้ว! สมาชิกคนอื่นจะได้รับการแจ้งเตือนทันที",
+              "success",
+              () => setView("SCHEDULE"),
+              "ไปดูตารางเรียน"
+            );
+          }, 500);
 
-              // 2. อัปเดตสถานะหน้าจอ
-              await fetchMyGroup();
-            } catch (e) {
-              Alert.alert("ข้อผิดพลาด", e.message);
-            } finally {
-              setLoading(false);
-            }
-          },
-        },
-      ],
-    );
+          // 2. อัปเดตสถานะหน้าจอ
+          await fetchMyGroup();
+        } catch (e) {
+          setTimeout(() => showModal("ข้อผิดพลาด", e.message, "error"), 500);
+        } finally {
+          setLoading(false);
+        }
+      },
+      "ยืนยัน"
+    ); // 🌟 ใช้ Modal
   };
 
   const formatTimeDisplay = (time) => {
@@ -318,6 +341,64 @@ export default function GroupSyncScreen({ student, setView }) {
   return (
     <LinearGradient colors={["#FFDAE4", "#FFF8F8"]} style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
+
+        {/* 🌟 Custom Modal ป็อปอัพสวยๆ แทรกตรงนี้ */}
+        <Modal
+          animationType="fade"
+          transparent={true}
+          visible={modalVisible}
+          onRequestClose={() => setModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              
+              <View style={[
+                styles.modalIconBg, 
+                { backgroundColor: modalConfig.type === 'success' ? '#E8F5E9' : modalConfig.type === 'warning' ? '#FFF3E0' : modalConfig.type === 'confirm' ? '#E3F2FD' : '#FFEBEE' }
+              ]}>
+                <Feather 
+                  name={modalConfig.type === 'success' ? "check-circle" : modalConfig.type === 'warning' ? "alert-triangle" : modalConfig.type === 'confirm' ? "help-circle" : "x-circle"} 
+                  size={32} 
+                  color={modalConfig.type === 'success' ? "#4CAF50" : modalConfig.type === 'warning' ? "#FF9800" : modalConfig.type === 'confirm' ? "#2196F3" : "#E53935"} 
+                />
+              </View>
+              
+              <Text style={styles.modalTitle}>{modalConfig.title}</Text>
+              <Text style={styles.modalMessage}>{modalConfig.message}</Text>
+              
+              {/* เปลี่ยนปุ่มตามสถานะ ถ้าเป็น confirm ให้มี 2 ปุ่ม ถ้าแจ้งผลให้มีปุ่มเดียว */}
+              {modalConfig.type === "confirm" ? (
+                <View style={styles.modalButtonContainer}>
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.cancelButton]}
+                    onPress={() => setModalVisible(false)}
+                  >
+                    <Text style={styles.cancelButtonText}>ยกเลิก</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalButton, styles.confirmButton, { backgroundColor: "#E53935" }]}
+                    onPress={handleModalConfirm}
+                  >
+                    <Text style={styles.confirmButtonText}>{modalConfig.confirmText}</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.modalButtonContainer}>
+                  <TouchableOpacity
+                    style={[styles.modalButton, { 
+                      backgroundColor: modalConfig.type === 'success' ? '#4CAF50' : modalConfig.type === 'warning' ? '#FF9800' : '#E53935'
+                    }]}
+                    onPress={handleModalConfirm}
+                  >
+                    <Text style={styles.confirmButtonText}>{modalConfig.confirmText}</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+              
+            </View>
+          </View>
+        </Modal>
+
         <View style={styles.header}>
           <TouchableOpacity onPress={() => setView("MENU")} style={styles.backButton}>
             <MaterialIcons name="arrow-back" size={24} color="#7b5455" />
@@ -369,13 +450,16 @@ export default function GroupSyncScreen({ student, setView }) {
                 <TouchableOpacity 
                   style={styles.leaveBtnPending} 
                   onPress={() => {
-                    Alert.alert("ยกเลิกคำขอ", "ยืนยันการยกเลิกคำขอเข้าร่วมกลุ่มหรือไม่?", [
-                      { text: "ยกเลิก", style: "cancel" },
-                      { text: "ยืนยัน", style: "destructive", onPress: async () => {
+                    showModal(
+                      "ยกเลิกคำขอ", 
+                      "ยืนยันการยกเลิกคำขอเข้าร่วมกลุ่มหรือไม่?", 
+                      "confirm", 
+                      async () => {
                         await leaveGroupAPI(student.student_id);
                         fetchMyGroup();
-                      }}
-                    ]);
+                      }, 
+                      "ยืนยัน"
+                    ); // 🌟 ใช้ Modal
                   }}
                 >
                   <Text style={styles.leaveBtnTextPending}>ยกเลิกคำขอ</Text>
@@ -478,7 +562,15 @@ export default function GroupSyncScreen({ student, setView }) {
                     <TouchableOpacity style={styles.syncBtn} onPress={handleSyncCart}>
                       <LinearGradient colors={["#10b981", "#059669"]} style={styles.syncGradient}><MaterialIcons name="sync" size={20} color="#fff" /><Text style={styles.syncBtnText}>Sync ตะกร้าให้ทุกคน</Text></LinearGradient>
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.dangerBtnOutline} onPress={() => { Alert.alert("ยุบกลุ่ม", "ยืนยันการลบกลุ่มหรือไม่?", [{ text: "ยกเลิก" }, { text: "ลบ", style: "destructive", onPress: async () => { await deleteGroupAPI(student.student_id); fetchMyGroup(); } }]) }}>
+                    <TouchableOpacity style={styles.dangerBtnOutline} onPress={() => { 
+                      showModal(
+                        "ยุบกลุ่ม", 
+                        "ยืนยันการลบกลุ่มหรือไม่?", 
+                        "confirm", 
+                        async () => { await deleteGroupAPI(student.student_id); fetchMyGroup(); }, 
+                        "ลบ"
+                      ); // 🌟 ใช้ Modal
+                    }}>
                       <Text style={styles.dangerBtnText}>ยุบกลุ่ม</Text>
                     </TouchableOpacity>
                   </>
@@ -505,7 +597,15 @@ export default function GroupSyncScreen({ student, setView }) {
                       </Text>
                     </TouchableOpacity>
                     
-                    <TouchableOpacity style={styles.dangerBtnOutline} onPress={() => { Alert.alert("ออกจากกลุ่ม", "ยืนยันหรือไม่?", [{ text: "ยกเลิก" }, { text: "ออก", style: "destructive", onPress: async () => { await leaveGroupAPI(student.student_id); fetchMyGroup(); } }]) }}>
+                    <TouchableOpacity style={styles.dangerBtnOutline} onPress={() => { 
+                      showModal(
+                        "ออกจากกลุ่ม", 
+                        "ยืนยันหรือไม่?", 
+                        "confirm", 
+                        async () => { await leaveGroupAPI(student.student_id); fetchMyGroup(); }, 
+                        "ออก"
+                      ); // 🌟 ใช้ Modal
+                    }}>
                       <Text style={styles.dangerBtnText}>ออกจากกลุ่ม</Text>
                     </TouchableOpacity>
                   </>
@@ -585,4 +685,74 @@ const styles = StyleSheet.create({
   pendingDesc: { fontSize: 14, color: "#837375", textAlign: "center", lineHeight: 20, marginBottom: 25 },
   leaveBtnPending: { paddingVertical: 12, paddingHorizontal: 30, borderRadius: 15, borderWidth: 1, borderColor: "#ef4444" },
   leaveBtnTextPending: { color: "#ef4444", fontWeight: "bold" },
+
+  // 🌟 สไตล์สำหรับ Custom Modal (ป็อปอัพสวยๆ)
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalContent: {
+    width: width * 0.85,
+    backgroundColor: "white",
+    borderRadius: 24,
+    padding: 24,
+    alignItems: "center",
+    elevation: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+  },
+  modalIconBg: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#1f1a1c",
+    marginBottom: 8,
+    textAlign: "center",
+  },
+  modalMessage: {
+    fontSize: 15,
+    color: "#837375",
+    textAlign: "center",
+    marginBottom: 24,
+    lineHeight: 22,
+  },
+  modalButtonContainer: {
+    flexDirection: "row",
+    justifyContent: "center",
+    width: "100%",
+  },
+  modalButton: {
+    flex: 1,
+    height: 48,
+    borderRadius: 14,
+    justifyContent: "center",
+    alignItems: "center",
+    marginHorizontal: 6,
+  },
+  cancelButton: {
+    backgroundColor: "#F5F5F5",
+  },
+  cancelButtonText: {
+    color: "#837375",
+    fontWeight: "600",
+  },
+  confirmButton: {
+    backgroundColor: "#E53935",
+  },
+  confirmButtonText: {
+    color: "white",
+    fontWeight: "bold",
+    fontSize: 16,
+  },
 });

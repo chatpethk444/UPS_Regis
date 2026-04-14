@@ -1,12 +1,13 @@
 import random
 import datetime
 import string
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import cast, String
 from pydantic import BaseModel
-from database import SessionLocal, Student, Course, ClassSection, EnrollmentCart, Enrollment, CurriculumCourse, StudyGroup, GroupMember
+from database import SessionLocal, Student, Course, ClassSection, EnrollmentCart, Enrollment, CurriculumCourse, StudyGroup, GroupMember, GradeRecord
 from itertools import product
 from database import engine, Base
 from typing import List, Optional
@@ -49,6 +50,7 @@ class CartRequest(BaseModel):
 class RemoveCartRequest(BaseModel):
     student_id: str
     course_code: str
+    section_type: Optional[str] = None # ✅ เพิ่ม section_type เพื่อการลบที่แม่นยำ
 
 class AISuggestRequest(BaseModel):
     student_id: str
@@ -56,9 +58,9 @@ class AISuggestRequest(BaseModel):
 
 
 # --- Constants ---
-CURRENT_YEAR_CODE = 68
-MAX_AI_PLANS = 5
-MAX_AI_COURSES = 8
+#CURRENT_YEAR_CODE = 68
+#MAX_AI_PLANS = 5
+#MAX_AI_COURSES = 8
 
 DAY_ORDER = {
     "Mon": 1, "Monday": 1, "จันทร์": 1,
@@ -156,6 +158,8 @@ def login(request: dict, db: Session = Depends(get_db)):
             "student_id": student.student_id,
             "first_name": student.name,
             "major": student.major,
+            "email": student.email,
+            "phone_number": student.phone_number,
             "year": student.curriculum_year,
             "faculty": student.faculty,
             "avatar_url": student.avatar_url,
@@ -691,25 +695,30 @@ def get_my_schedule(student_id: str, db: Session = Depends(get_db)):
     return result
 
 @app.post("/cart/remove")
-def remove_cart_item_post(request: RemoveCartRequest, db: Session = Depends(get_db)):
-    items = db.query(EnrollmentCart).filter(
+def post_remove_from_cart(request: RemoveCartRequest, db: Session = Depends(get_db)):
+    # 🌟 จุดสำคัญ: กรองด้วย student_id, course_id และ section_type เพื่อความแม่นยำ
+    query = db.query(EnrollmentCart).filter(
         EnrollmentCart.student_id == request.student_id,
-        EnrollmentCart.course_id == request.course_code,
-    ).all()
-    if not items:
-        raise HTTPException(status_code=404, detail="ไม่พบวิชานี้ในตะกร้า")
-    for item in items:
+        EnrollmentCart.course_id == request.course_code 
+    )
+    
+    if request.section_type:
+        query = query.filter(EnrollmentCart.section_type == request.section_type)
+        
+    item = query.first()
+    
+    if item:
         db.delete(item)
-    db.commit()
-    return {"message": "ลบออกจากตะกร้าสำเร็จ"}
-
-
+        db.commit()
+        return {"message": "ลบวิชาออกจากตะกร้าสำเร็จ"}
+        
+    raise HTTPException(status_code=404, detail="ไม่พบวิชานี้ในตะกร้า")
 
 
 from typing import Optional # เช็กด้วยว่าข้างบนสุดของไฟล์ import หรือยัง
 
 @app.delete("/cart/remove/{student_id}/{course_code}")
-def remove_from_cart(student_id: str, course_code: str, section_type: Optional[str] = None, db: Session = Depends(get_db)):
+def delete_remove_from_cart(student_id: str, course_code: str, section_type: Optional[str] = None, db: Session = Depends(get_db)):
     # 1. ค้นหาวิชาและรหัสนักศึกษา
     query = db.query(EnrollmentCart).filter(
         EnrollmentCart.student_id == student_id,
@@ -1195,39 +1204,100 @@ def confirm_enrollment(student_id: str, db: Session = Depends(get_db)):
 def withdraw_course(data: dict, db: Session = Depends(get_db)):
     student_id = data.get("student_id")
     course_code = data.get("course_code")
+    section_number = str(data.get("section_number")) # รับ section_number มาด้วย
     section_type = data.get("section_type")
 
-    # 1. ลบวิชาออกจากตารางเรียน (ตาราง Enrollment น่าจะมี section_type ตามที่คุณเคยลงไป)
-    # ถ้าตาราง Enrollment ของคุณก็ไม่มี section_type ให้ลบบรรทัด Enrollment.section_type ทิ้งไปเลยครับ
+    # 1. ลบวิชาออกจากตารางเรียน (กรองให้ครบทุกฟิลด์เพื่อความแม่นยำ)
     enrollment = db.query(Enrollment).filter(
         Enrollment.student_id == student_id,
         Enrollment.course_id == course_code,
+        Enrollment.section_number == section_number,
         Enrollment.section_type == section_type
     ).first()
 
     if not enrollment:
         raise HTTPException(status_code=404, detail="ไม่พบข้อมูลการลงทะเบียนวิชานี้")
 
-    # เก็บหมายเลขกลุ่มเรียนไว้ก่อนลบ เพื่อเอาไปคืนค่าที่นั่งให้ถูกกลุ่ม
-    sec_num = enrollment.section_number 
-
     # ลบออกจากตารางเรียน
     db.delete(enrollment)
 
     # 2. คืนค่าที่นั่ง (ลบ enrolled_seats - 1)
-    # 🌟 แก้ไขตรงนี้: เปลี่ยนจากการหาด้วย section_type เป็นหาด้วย section_number แทน
+    # 🌟 กรองให้ตรงกลุ่มเรียน (section_number) และเช็คประเภท (section_type) ให้ตรงกันก่อนลดที่นั่ง
     section_to_update = db.query(ClassSection).filter(
         ClassSection.course_id == course_code,
-        ClassSection.section_number == sec_num
+        ClassSection.section_number == section_number
     ).all()
 
-    # บางวิชามี 2 แถว (ทฤษฎี/ปฏิบัติ) ใน 1 กลุ่มเรียน เลยต้องวนลูปเผื่อไว้
+    # บางวิชามี 2 แถว (ทฤษฎี/ปฏิบัติ) ใน 1 กลุ่มเรียน เลยต้องเช็คประเภทให้ชัวร์
     for sec in section_to_update:
-        if sec.enrolled_seats > 0:
-            sec.enrolled_seats -= 1
+        # ตรวจสอบว่าประเภทของแถวนี้ (T/L) ตรงกับวิชาที่ถอนหรือไม่
+        if get_section_type_from_room(sec.room or "") == section_type:
+            if sec.enrolled_seats > 0:
+                sec.enrolled_seats -= 1
         
     db.commit()
     return {"status": "success", "message": "ถอนรายวิชาสำเร็จ"}
+
+
+# เพิ่มที่ไฟล์ main.py
+@app.get("/grades/{student_id}")
+def get_student_grades(student_id: str, db: Session = Depends(get_db)):
+    # 🌟 ทำการ JOIN ตาราง GradeRecord กับ Course ด้วย course_id
+    results = (
+        db.query(GradeRecord, Course.credits, Course.course_name)
+        .join(Course, GradeRecord.course_id == Course.course_id)
+        .filter(GradeRecord.student_id == student_id)
+        .all()
+    )
+    
+    grades_data = []
+    for grade, credits, course_name in results:
+        grades_data.append({
+            "course_id": grade.course_id,
+            "course_name": course_name,
+            "grade": grade.grade,
+            "semester": grade.semester,
+            "credits": credits  # จะได้ข้อมูลมาเป็นสตริง เช่น "3(3-0-6)" หรือ "2"
+        })
+        
+    return grades_data
+
+# 🌟 API สำหรับดึงข้อมูล Section ทั้งหมดของวิชาที่ระบุ
+@app.get("/courses/{course_id}/sections")
+def get_course_sections(course_id: str, db: Session = Depends(get_db)):
+    # ค้นหาจาก ClassSection
+    sections = db.query(ClassSection).filter(ClassSection.course_id == course_id).all()
+    
+    if not sections:
+        return [] 
+        
+    # 🌟 จัดกลุ่มตาม (section_number, section_type) เพื่อไม่ให้แสดงซ้ำเมื่อเรียนหลายวัน
+    grouped = {}
+    for sec in sections:
+        s_type = get_section_type_from_room(sec.room or "")
+        key = (sec.section_number, s_type)
+        
+        if key not in grouped:
+            grouped[key] = {
+                "course_id": sec.course_id,
+                "section_number": sec.section_number,
+                "section_type": s_type,
+                "day_of_week": sec.day_of_week or "",
+                "start_time": str(sec.start_time) if sec.start_time else None,
+                "end_time": str(sec.end_time) if sec.end_time else None,
+                "max_seats": sec.max_seats,
+                "enrolled_seats": sec.enrolled_seats
+            }
+        else:
+            # ถ้ามีหลายวันเรียน ให้เอามาต่อกัน
+            if sec.day_of_week and sec.day_of_week not in grouped[key]["day_of_week"]:
+                if grouped[key]["day_of_week"]:
+                    grouped[key]["day_of_week"] += f", {sec.day_of_week}"
+                else:
+                    grouped[key]["day_of_week"] = sec.day_of_week
+                    
+    return list(grouped.values())
+
 
 
 Base.metadata.create_all(bind=engine)

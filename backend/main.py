@@ -124,7 +124,7 @@ def format_plan(plan: list) -> list:
             "section_number": str(s.section_number),
             "section_type": sec_type,
             "instructor": s.instructor_id,
-            "instructor_name": s.instructor_name, 
+            "instructor_name": s.instructor.instructor_name if s.instructor else "ไม่ระบุ", 
             "enrolled_seats": s.enrolled_seats,
             "max_seats": s.max_seats,
             "class_times": [{"day": raw_day, "start": start_float, "end": end_float}],

@@ -1185,57 +1185,54 @@ def delete_group(leader_id: str, db: Session = Depends(get_db)):
 
 @app.post("/cart/confirm/{student_id}")
 def confirm_enrollment(student_id: str, db: Session = Depends(get_db)):
-    # 1. ดึงวิชาทั้งหมดในตะกร้าของนักศึกษาคนนี้
+    # 1. ดึงวิชาในตะกร้า (แนะนำให้ล็อคตะกร้าไว้ด้วยเพื่อความปลอดภัย)
     cart_items = db.query(EnrollmentCart).filter(EnrollmentCart.student_id == student_id).all()
-    
+   
     if not cart_items:
-        raise HTTPException(status_code=400, detail="ตะกร้าว่างเปล่า ไม่มีวิชาให้ยืนยันการลงทะเบียน")
+        raise HTTPException(status_code=400, detail="ตะกร้าว่างเปล่า...")
 
-    # 2. ย้ายข้อมูลจากตะกร้าไปที่ตาราง Enrollment (ตารางเรียนจริง)
     for item in cart_items:
-        # เช็คก่อนว่าเคยลงทะเบียนวิชา+Type นี้ไปแล้วหรือยัง (กันลงซ้ำ)
         existing = db.query(Enrollment).filter(
             Enrollment.student_id == student_id,
             Enrollment.course_id == item.course_id,
             Enrollment.section_type == item.section_type
         ).first()
-        
+       
         if not existing:
-            # 🌟 แก้ไขตรงนี้: ดึง ClassSection มาทั้งหมดก่อน (ตัด .filter(section_type) ออก)
-            sections = db.query(ClassSection).filter(
+            # 🌟 จุดสำคัญที่ 1: เพิ่ม .with_for_update() เพื่อล็อคกลุ่มเรียนนี้
+            # ใครมาถึงบรรทัดนี้พร้อมกัน คนที่สองจะต้อง "รอ" จนกว่าคนแรกจะ commit
+            sections = db.query(ClassSection).with_for_update().filter(
                 ClassSection.course_id == item.course_id,
                 ClassSection.section_number == item.section_number
             ).all()
 
             target_section = None
-            
-            # 🌟 ใช้ Python วนลูปหา Section ที่เป็น ทฤษฎี หรือ ปฏิบัติ ตามที่อยู่ในตะกร้า
             for s in sections:
-                # เรียกใช้ฟังก์ชันแปลงชื่อห้องเป็น Type เหมือนที่คุณใช้ในจุดอื่นๆ
                 s_type = get_section_type_from_room(s.room or "")
                 if s_type == item.section_type:
                     target_section = s
                     break
-            
-            # ถ้าหาเป๊ะๆ ไม่เจอ ให้ดึงตัวแรกมาจัดการแทน (Fallback)
+           
             if not target_section and sections:
                 target_section = sections[0]
 
             if target_section:
-                # เช็คว่าที่นั่งเต็มไหม
+                # 🌟 จุดสำคัญที่ 2: เช็คจำนวนที่นั่ง
+                # เนื่องจากเราล็อค (with_for_update) ไว้ด้านบนแล้ว 
+                # ค่า enrolled_seats ที่ดึงมาตรงนี้จะเป็นค่าล่าสุดที่ถูกต้องแน่นอน
                 cap = target_section.max_seats or 0
                 enr = target_section.enrolled_seats or 0
-                
+               
                 if cap > 0 and enr >= cap:
+                    # ถ้าคนที่หนึ่งเอาที่นั่งสุดท้ายไปแล้ว คนที่สองจะหลุดมาเจอ error นี้ทันที
                     raise HTTPException(
-                        status_code=400, 
+                        status_code=400,
                         detail=f"ไม่สามารถลงทะเบียนได้: วิชา {item.course_id} กลุ่ม {item.section_number} ที่นั่งเต็มแล้ว"
                     )
-                
-                # เพิ่มยอดคนลงทะเบียน (+1)
+               
+                # เพิ่มยอดคนลงทะเบียน
                 target_section.enrolled_seats = enr + 1
 
-            # บันทึกวิชาลงตาราง Enrollment (ตารางเรียนหลัก)
             new_enrollment = Enrollment(
                 student_id=student_id,
                 course_id=item.course_id,
@@ -1244,12 +1241,11 @@ def confirm_enrollment(student_id: str, db: Session = Depends(get_db)):
             )
             db.add(new_enrollment)
             
-    # 3. ลบวิชาออกจากตะกร้า หลังจากย้ายไปตารางเรียนแล้ว
     db.query(EnrollmentCart).filter(EnrollmentCart.student_id == student_id).delete()
-    
-    # 4. ยืนยันการบันทึกข้อมูลทั้งหมดลงฐานข้อมูล
+   
+    # 🌟 เมื่อเรียก commit() ระบบจะปลดล็อคแถวที่ล็อคไว้ทั้งหมดในฐานข้อมูล
     db.commit()
-    
+   
     return {"message": "ลงทะเบียนสำเร็จ"}
 
 # =============================================================
@@ -1318,7 +1314,8 @@ def withdraw_course(data: dict, db: Session = Depends(get_db)):
         message = f"ถอนวิชา {course_label} สำเร็จ และระบบได้โอนสิทธิ์ให้คนรอคิวลำดับถัดไปเรียบร้อยแล้ว"
     else:
         # ❌ ไม่มีคนรอคิว คืนที่นั่งเข้า Section ปกติ
-        sections = db.query(ClassSection).filter(
+        # 🌟 เพิ่ม .with_for_update() ตรงนี้เพื่อล็อคแถว ClassSection ป้องกันคนดึงข้อมูลชนกันตอนคืนที่นั่ง
+        sections = db.query(ClassSection).with_for_update().filter(
             ClassSection.course_id == course_code,
             ClassSection.section_number == section_number_int
         ).all()

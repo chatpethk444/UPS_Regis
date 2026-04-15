@@ -5,17 +5,64 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import cast, String
+from sqlalchemy import cast, String, func
 from pydantic import BaseModel
-from database import SessionLocal, Student, Course, ClassSection, EnrollmentCart, Enrollment, CurriculumCourse, StudyGroup, GroupMember, GradeRecord
+from database import SessionLocal, Student, Course, ClassSection, EnrollmentCart, Enrollment, CurriculumCourse, StudyGroup, GroupMember, GradeRecord, Waitlist, WaitlistStatus
 from itertools import product
 from database import engine, Base
 from typing import List, Optional
+from notifications import send_push_message
 import re
 import random
 import string
 
 app = FastAPI()
+
+
+# ---------------- ฟังก์ชันตรวจสอบและจัดการ Waitlist ที่หมดอายุ ----------------
+def process_waitlist_expiry():
+    db = SessionLocal()
+    try:
+        now = datetime.datetime.utcnow()
+        expiry_time = now - datetime.timedelta(minutes=30)
+
+        # 1. หาคนที่ได้สิทธิ์ (ALLOCATED) แต่ไม่มายืนยันภายใน 30 นาที
+        expired_entries = db.query(Waitlist).filter(
+            Waitlist.status == WaitlistStatus.ALLOCATED,
+            Waitlist.allocated_at <= expiry_time
+        ).all()
+
+        for entry in expired_entries:
+            # เปลี่ยนสถานะเป็นหมดอายุ
+            entry.status = WaitlistStatus.EXPIRED
+            print(f"Waitlist ID {entry.id} (Student: {entry.student_id}) has EXPIRED.")
+
+            # 2. หาคนถัดไปในคิว (PENDING ที่คิวน้อยที่สุด) ของวิชาและกลุ่มเดียวกัน
+            next_in_queue = db.query(Waitlist).filter(
+                Waitlist.course_id == entry.course_id,
+                Waitlist.section_number == entry.section_number,
+                Waitlist.section_type == entry.section_type,
+                Waitlist.status == WaitlistStatus.PENDING
+            ).order_by(Waitlist.queue_position.asc()).first()
+
+            if next_in_queue:
+                # โอนสิทธิ์ให้คนถัดไป
+                next_in_queue.status = WaitlistStatus.ALLOCATED
+                next_in_queue.allocated_at = now
+                print(f"Waitlist ID {next_in_queue.id} (Student: {next_in_queue.student_id}) is now ALLOCATED.")
+
+        db.commit()
+    except Exception as e:
+        print(f"Error in Waitlist Scheduler: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    scheduler.shutdown()
+    print("Waitlist Background Scheduler Stopped.")
 
 def generate_random_code():
     # สุ่มตัวอักษรภาษาอังกฤษพิมพ์ใหญ่ผสมตัวเลข ความยาว 6 ตัว (เช่น YOVI09, 8C4LV4)
@@ -56,6 +103,14 @@ class AISuggestRequest(BaseModel):
     student_id: str
     course_codes: List[str]
 
+class WaitlistJoinRequest(BaseModel):
+    student_id: str
+    course_code: str
+    section_number: int
+    section_type: str  # "T" หรือ "L"
+
+class PushTokenUpdate(BaseModel):
+    push_token: str
 
 # --- Constants ---
 #CURRENT_YEAR_CODE = 68
@@ -1198,46 +1253,85 @@ def confirm_enrollment(student_id: str, db: Session = Depends(get_db)):
     return {"message": "ลงทะเบียนสำเร็จ"}
 
 # =============================================================
-# API สำหรับถอนรายวิชา
+# API สำหรับถอนรายวิชา (ปรับปรุงใหม่: รองรับการโอนสิทธิ์ให้ Waitlist + แจ้งเตือน)
 # =============================================================
 @app.post("/enrollment/withdraw")
 def withdraw_course(data: dict, db: Session = Depends(get_db)):
     student_id = data.get("student_id")
     course_code = data.get("course_code")
-    section_number = str(data.get("section_number")) # รับ section_number มาด้วย
+    section_number_str = str(data.get("section_number"))
     section_type = data.get("section_type")
-
-    # 1. ลบวิชาออกจากตารางเรียน (กรองให้ครบทุกฟิลด์เพื่อความแม่นยำ)
+    
+    # 1. ค้นหาข้อมูล Enrollment
     enrollment = db.query(Enrollment).filter(
         Enrollment.student_id == student_id,
         Enrollment.course_id == course_code,
-        Enrollment.section_number == section_number,
+        Enrollment.section_number == section_number_str,
         Enrollment.section_type == section_type
     ).first()
 
     if not enrollment:
         raise HTTPException(status_code=404, detail="ไม่พบข้อมูลการลงทะเบียนวิชานี้")
 
-    # ลบออกจากตารางเรียน
+    # ดึงข้อมูลชื่อวิชาไว้แสดงใน message
+    course = db.query(Course).filter(Course.course_id == course_code).first()
+    course_label = f"{course_code} {course.course_name if course else ''}"
+
+    # ลบข้อมูลการลงทะเบียน
     db.delete(enrollment)
 
-    # 2. คืนค่าที่นั่ง (ลบ enrolled_seats - 1)
-    # 🌟 กรองให้ตรงกลุ่มเรียน (section_number) และเช็คประเภท (section_type) ให้ตรงกันก่อนลดที่นั่ง
-    section_to_update = db.query(ClassSection).filter(
-        ClassSection.course_id == course_code,
-        ClassSection.section_number == section_number
-    ).all()
+    # 2. ลอจิกจัดการที่นั่ง (Waitlist Transfer)
+    section_number_int = int(re.sub(r'\D', '', section_number_str)) # แปลงเลขกลุ่มให้เป็น int ปลอดภัยกว่า
 
-    # บางวิชามี 2 แถว (ทฤษฎี/ปฏิบัติ) ใน 1 กลุ่มเรียน เลยต้องเช็คประเภทให้ชัวร์
-    for sec in section_to_update:
-        # ตรวจสอบว่าประเภทของแถวนี้ (T/L) ตรงกับวิชาที่ถอนหรือไม่
-        if get_section_type_from_room(sec.room or "") == section_type:
-            if sec.enrolled_seats > 0:
-                sec.enrolled_seats -= 1
+    # หาคนคิวแรกสุดที่ยังสถานะ PENDING
+    next_in_queue = db.query(Waitlist).with_for_update().filter(
+        Waitlist.course_id == course_code,
+        Waitlist.section_number == section_number_int,
+        Waitlist.section_type == section_type,
+        Waitlist.status == WaitlistStatus.PENDING
+    ).order_by(Waitlist.created_at.asc()).first() # ใช้เวลาที่กดคิว (created_at) เป็นหลักในการตัดสิน
+
+    if next_in_queue:
+        # ✅ โอนสิทธิ์ให้คนใน Waitlist (ที่นั่ง enrolled_seats ใน ClassSection ไม่ต้องลด)
+        next_in_queue.status = WaitlistStatus.ALLOCATED
+        next_in_queue.allocated_at = datetime.datetime.utcnow()
         
-    db.commit()
-    return {"status": "success", "message": "ถอนรายวิชาสำเร็จ"}
+        # ==========================================
+        # 🌟 ส่วนที่เพิ่มใหม่: แจ้งเตือนไปยังคนที่ได้สิทธิ์
+        # ==========================================
+        student_in_queue = db.query(Student).filter(Student.student_id == next_in_queue.student_id).first()
+        
+        if student_in_queue and student_in_queue.expo_push_token:
+            try:
+                # เรียกใช้ฟังก์ชันส่งแจ้งเตือน
+                send_push_message(
+                    token=student_in_queue.expo_push_token,
+                    title="ถึงคิวของคุณแล้ว! 🎉",
+                    message=f"วิชา {course_label} มีที่นั่งว่างแล้ว! กรุณายืนยันสิทธิ์ภายใน 30 นาที",
+                    extra={"course_id": course_code, "screen": "Waitlist"} # ส่งข้อมูลแฝงไปให้แอปใช้เปิดหน้า
+                )
+            except Exception as e:
+                # ปริ้นท์ error ไว้ดูใน log (ไม่ให้ API พังถ้าส่งแจ้งเตือนไม่ผ่าน)
+                print(f"Push Notification Error: ไม่สามารถส่งแจ้งเตือนไปที่ {next_in_queue.student_id} ได้ - {e}")
+        # ==========================================
 
+        message = f"ถอนวิชา {course_label} สำเร็จ และระบบได้โอนสิทธิ์ให้คนรอคิวลำดับถัดไปเรียบร้อยแล้ว"
+    else:
+        # ❌ ไม่มีคนรอคิว คืนที่นั่งเข้า Section ปกติ
+        sections = db.query(ClassSection).filter(
+            ClassSection.course_id == course_code,
+            ClassSection.section_number == section_number_int
+        ).all()
+        
+        for sec in sections:
+            # เช็คว่าเป็น Section ทฤษฎี หรือ ปฏิบัติ ให้ตรงกับที่ถอน
+            if get_section_type_from_room(sec.room or "") == section_type:
+                if sec.enrolled_seats > 0:
+                    sec.enrolled_seats -= 1
+        message = f"ถอนวิชา {course_label} สำเร็จ"
+
+    db.commit()
+    return {"status": "success", "message": message}
 
 # เพิ่มที่ไฟล์ main.py
 @app.get("/grades/{student_id}")
@@ -1297,6 +1391,365 @@ def get_course_sections(course_id: str, db: Session = Depends(get_db)):
                     grouped[key]["day_of_week"] = sec.day_of_week
                     
     return list(grouped.values())
+
+
+
+# =============================================================
+# 7. ระบบ Waitlist (ลำดับรอลงทะเบียน)
+# =============================================================
+
+@app.post("/waitlist/join")
+def join_waitlist(req: WaitlistJoinRequest, db: Session = Depends(get_db)):
+    # 🌟 1. เช็คว่ากลุ่มเรียนนี้มีอยู่จริงหรือไม่
+    sections = db.query(ClassSection).filter(
+        ClassSection.course_id == req.course_code,
+        ClassSection.section_number == req.section_number
+    ).all()
+    
+    target_sections = [s for s in sections if get_section_type_from_room(s.room or "") == req.section_type]
+    if not target_sections:
+        raise HTTPException(status_code=404, detail="ไม่พบกลุ่มเรียนที่ระบุ")
+
+    # 🌟 2. เงื่อนไข: เช็คว่าวิชานี้เต็มจริงๆ (ถ้าไม่เต็มให้ไปแอดลงตะกร้า/ลงทะเบียนปกติ)
+    is_full = any(s.max_seats > 0 and s.enrolled_seats >= s.max_seats for s in target_sections)
+    if not is_full:
+        raise HTTPException(status_code=400, detail="กลุ่มเรียนนี้ยังมีที่ว่าง ไม่จำเป็นต้องเข้าคิว")
+
+    # 🌟 3. เช็คว่าเคยเข้าคิววิชานี้ไปแล้วหรือยัง
+    existing_waitlist = db.query(Waitlist).filter(
+        Waitlist.student_id == req.student_id,
+        Waitlist.course_id == req.course_code,
+        Waitlist.section_type == req.section_type,
+        Waitlist.status == WaitlistStatus.PENDING
+    ).first()
+    if existing_waitlist:
+        raise HTTPException(status_code=400, detail="คุณได้เข้าคิววิชานี้ไว้เรียบร้อยแล้ว")
+
+
+    conflict_msg = check_conflict_with_all(target_sections, req.student_id, db)
+    if conflict_msg:
+        raise HTTPException(status_code=400, detail=f"เวลาเรียนทับซ้อน: {conflict_msg}")
+
+    # 🌟 5. หา queue_position ล่าสุด (ใช้ with_for_update เพื่อกันคนอื่นแอดพร้อมกัน)
+    # ล็อกแถวที่เกี่ยวข้องกับวิชานี้ใน Waitlist เพื่อคำนวณคิว
+    last_wait = db.query(Waitlist).with_for_update().filter(
+        Waitlist.course_id == req.course_code,
+        Waitlist.section_number == req.section_number,
+        Waitlist.section_type == req.section_type
+    ).order_by(Waitlist.queue_position.desc()).first()
+
+    next_pos = (last_wait.queue_position + 1) if last_wait else 1
+
+    # 🌟 6. บันทึกลงฐานข้อมูล
+    new_entry = Waitlist(
+        student_id=req.student_id,
+        course_id=req.course_code,
+        section_number=req.section_number,
+        section_type=req.section_type,
+        status=WaitlistStatus.PENDING,
+        queue_position=next_pos
+    )
+    
+    db.add(new_entry)
+    db.commit()
+
+    return {
+        "message": "เข้าสู่ลำดับรอลงทะเบียน (Waitlist) สำเร็จ",
+        "queue_position": next_pos
+    }
+
+# 🌟 API สำหรับดึงสถานะคิว (Waitlist) ของนักศึกษา
+@app.get("/waitlist/status/{student_id}")
+def get_waitlist_status(student_id: str, db: Session = Depends(get_db)):
+    # ดึงรายการ waitlist ของนักศึกษา เรียงตามล่าสุดที่กด
+    waitlists = db.query(Waitlist).filter(Waitlist.student_id == student_id).order_by(Waitlist.created_at.desc()).all()
+    
+    result = []
+    for w in waitlists:
+        # 1. ดึงชื่อวิชา
+        course = db.query(Course).filter(Course.course_id == w.course_id).first()
+        
+        # 2. ดึงรายละเอียดวันเวลาเรียนและห้อง
+        sections = db.query(ClassSection).filter(
+            ClassSection.course_id == w.course_id,
+            ClassSection.section_number == w.section_number
+        ).all()
+        
+        # เลือกเอาเฉพาะ section ที่มี type (T/L) ตรงกับที่เข้าคิวไว้
+        target_section = next((s for s in sections if get_section_type_from_room(s.room or "") == w.section_type), None)
+        
+        # 3. 🌟 คำนวณคิวใหม่แบบ Real-time (Auto Update)
+        # ถ้าสถานะเป็น PENDING ให้คำนวณว่ามีใคร "มาก่อนเรา" ในคิวนี้บ้าง
+        if w.status == WaitlistStatus.PENDING:
+            current_queue = db.query(Waitlist).filter(
+                Waitlist.course_id == w.course_id,
+                Waitlist.section_number == w.section_number,
+                Waitlist.section_type == w.section_type,
+                Waitlist.status == WaitlistStatus.PENDING,
+                Waitlist.created_at <= w.created_at # ใครที่ timestamp น้อยกว่าหรือเท่ากับเราคือคิวที่มาถึงก่อน
+            ).count()
+        else:
+            current_queue = 0 # ถ้าได้สิทธิ์แล้ว หรือ confirm แล้ว ไม่ต้องโชว์คิวลำดับ
+
+        result.append({
+            "id": w.id,
+            "course_id": w.course_id,
+            "course_name": course.course_name if course else "Unknown",
+            "section_number": w.section_number,
+            "section_type": w.section_type,
+            "status": w.status.value,
+            "queue_position": current_queue, # ส่งคิวที่คำนวณใหม่ไปให้แอป
+            "created_at": w.created_at.isoformat(), # วันเวลาที่กด Waitlist
+            "allocated_at": w.allocated_at.isoformat() if w.allocated_at else None,
+            "schedule": f"{target_section.day_of_week} {target_section.start_time}-{target_section.end_time}" if target_section else "N/A",
+            "room": target_section.room if target_section else "N/A"
+        })
+    
+    return result
+
+
+# 🌟 ดึงฟังก์ชันเช็คเวลาชนออกมาไว้ข้างนอก เพื่อให้ใช้ร่วมกันได้
+def check_conflict_with_all(new_slots, student_id, db: Session):
+    # 1. เช็คชนกับตารางเรียนจริง
+    enrolled = db.query(Enrollment).filter(Enrollment.student_id == student_id).all()
+    for e in enrolled:
+        e_secs = db.query(ClassSection).filter(
+            ClassSection.course_id == e.course_id, 
+            cast(ClassSection.section_number, String) == str(e.section_number)
+        ).all()
+        e_slots = [s for s in e_secs if get_section_type_from_room(s.room or "") == (e.section_type or "T")]
+        if is_conflict(new_slots + e_slots):
+            return f"{e.course_id} ในตารางเรียน"
+
+    # 2. เช็คชนกับวิชาในตะกร้า
+    cart = db.query(EnrollmentCart).filter(EnrollmentCart.student_id == student_id).all()
+    for c in cart:
+        c_secs = db.query(ClassSection).filter(
+            ClassSection.course_id == c.course_id, 
+            cast(ClassSection.section_number, String) == str(c.section_number)
+        ).all()
+        c_slots = [s for s in c_secs if get_section_type_from_room(s.room or "") == (c.section_type or "T")]
+        if is_conflict(new_slots + c_slots):
+            return f"{c.course_id} ในตะกร้าเรียน"
+            
+    return None
+
+
+#  confirm waitlist
+@app.post("/waitlist/confirm/{waitlist_id}")
+def confirm_waitlist_seat(waitlist_id: int, db: Session = Depends(get_db)):
+    # ดึงข้อมูลคิวที่นักศึกษากด
+    waitlist_entry = db.query(Waitlist).filter(Waitlist.id == waitlist_id).first()
+    if not waitlist_entry:
+        raise HTTPException(status_code=404, detail="ไม่พบข้อมูลการรอคิว")
+
+    if waitlist_entry.status != WaitlistStatus.ALLOCATED:
+        raise HTTPException(status_code=400, detail="สถานะคิวไม่ถูกต้อง หรือคุณไม่มีสิทธิ์ยืนยันในขณะนี้")
+
+    # 🌟 เงื่อนไข 4: เช็คเวลา 30 นาที (เผื่อหลุดจากการตัดคิวของ Background Task)
+    now = datetime.datetime.utcnow()
+    if (now - waitlist_entry.allocated_at).total_seconds() > 1800:
+        waitlist_entry.status = WaitlistStatus.EXPIRED
+        db.commit()
+        raise HTTPException(status_code=400, detail="สิทธิ์ของคุณถูกตัดแล้วเนื่องจากหมดเวลา 30 นาที")
+
+    student_id = waitlist_entry.student_id
+    course_id = waitlist_entry.course_id
+    sec_num = waitlist_entry.section_number
+    sec_type = waitlist_entry.section_type
+
+    # 1. ค้นหากลุ่มเรียนให้ชัวร์ 
+    # 🛠️ แก้ไข: เปลี่ยนจาก waitlist เป็น course_id และ sec_num ที่ตัวแปรดึงมาแล้ว
+    sections = db.query(ClassSection).filter(
+        ClassSection.course_id == course_id,
+        cast(ClassSection.section_number, String) == str(sec_num)
+    ).all()
+    
+    # 2. หา section ที่ตรงกับประเภท T/L
+    # 🛠️ แก้ไข: เปลี่ยนจาก waitlist.section_type เป็น sec_type
+    target_section = next((s for s in sections if get_section_type_from_room(s.room or "") == sec_type), None)
+
+    # 🌟 3. ต้องเพิ่มตัวเช็คตรงนี้ เพื่อไม่ให้พังเวลาหาไม่เจอ
+    if not target_section:
+        raise HTTPException(status_code=404, detail="ไม่พบข้อมูลกลุ่มเรียนนี้ในระบบ หรืออาจมีการเปลี่ยนแปลงตารางเรียน")
+    
+    # ❌ ลบ target_section.enrolled_seats += 1 ออกจากตรงนี้ (ที่บวกเบิ้ลไว้)
+
+    # 🌟 เงื่อนไข 2: เช็ครายวิชานี้ (T/L) ซ้ำกันในตะกร้า หรือ ตารางเรียนไหม
+    # 2.1 เช็คในตารางเรียน (Enrollment)
+    already_enrolled = db.query(Enrollment).filter(
+        Enrollment.student_id == student_id,
+        Enrollment.course_id == course_id,
+        Enrollment.section_type == sec_type
+    ).first()
+    if already_enrolled:
+        raise HTTPException(status_code=400, detail=f"คุณมีวิชา {course_id} ({sec_type}) ในตารางเรียนอยู่แล้ว")
+
+    # 2.2 เช็คในตะกร้า (Cart)
+    in_cart = db.query(EnrollmentCart).filter(
+        EnrollmentCart.student_id == student_id,
+        EnrollmentCart.course_id == course_id,
+        EnrollmentCart.section_type == sec_type
+    ).first()
+    if in_cart:
+        raise HTTPException(status_code=400, detail=f"วิชา {course_id} ({sec_type}) มีอยู่ในตะกร้าเรียนแล้ว กรุณาลบออกก่อนยืนยันสิทธิ์")
+
+    # 🌟 เงื่อนไข 3: เช็คเวลาชนกัน (ใช้ฟังก์ชัน check_conflict_with_all)
+    conflict_msg = check_conflict_with_all([target_section], student_id, db)
+    if conflict_msg:
+        raise HTTPException(status_code=400, detail=f"เวลาเรียนชน: {conflict_msg}")
+
+    try:
+        # 🌟 เมื่อผ่านทุกเงื่อนไข: เพิ่มลง "ตารางเรียน" ทันที
+        new_enrollment = Enrollment(
+            student_id=student_id,
+            course_id=course_id,
+            section_number=sec_num,
+            section_type=sec_type
+        )
+        db.add(new_enrollment)
+
+        # ❌ ลบ target_section.enrolled_seats += 1 ด้านล่างนี้ออกเช่นกัน 
+        # (เพราะสิทธิ์ที่นั่งนี้ถูกล็อกกั๊กไว้ตั้งแต่วินาทีที่คนก่อนหน้าถอนวิชาแล้ว ยอดจึงพอดีเป๊ะ)
+
+        # อัปเดตสถานะ Waitlist เป็น CONFIRMED (ยืนยันแล้ว)
+        waitlist_entry.status = WaitlistStatus.CONFIRMED
+        
+        db.commit()
+        return {"message": "ยืนยันสิทธิ์และเพิ่มลงตารางสำเร็จ"}
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="เกิดข้อผิดพลาดในการบันทึกข้อมูลลงตารางเรียน")
+
+# 🌟 API สำหรับสละสิทธิ์ / ยกเลิกคิว
+@app.post("/waitlist/cancel/{waitlist_id}")
+def cancel_waitlist_seat(waitlist_id: int, db: Session = Depends(get_db)):
+    waitlist = db.query(Waitlist).filter(Waitlist.id == waitlist_id).first()
+    if not waitlist:
+        raise HTTPException(status_code=404, detail="ไม่พบข้อมูลคิวนี้")
+    
+    was_allocated = (waitlist.status == WaitlistStatus.ALLOCATED)
+    course_id, sec_num, sec_type = waitlist.course_id, waitlist.section_number, waitlist.section_type
+    
+    db.delete(waitlist)
+    db.commit()
+    
+    # 🌟 ถ้าเขาสละสิทธิ์ตอนที่ "ได้สิทธิ์แล้ว" ต้องจ่ายสิทธิ์ให้คิวถัดไปทันที
+    if was_allocated:
+        next_in_waitlist = db.query(Waitlist).filter(
+            Waitlist.course_id == course_id,
+            Waitlist.section_number == sec_num,
+            Waitlist.section_type == sec_type,
+            Waitlist.status == WaitlistStatus.PENDING
+        ).order_by(Waitlist.created_at.asc()).first()
+        
+        if next_in_waitlist:
+            next_in_waitlist.status = WaitlistStatus.ALLOCATED
+            next_in_waitlist.allocated_at = datetime.datetime.utcnow()
+            db.commit()
+        else:
+            # 🌟 ถ้าไม่มีคนรอคิวต่อท้ายแล้ว ค่อยคืนที่นั่งให้ระบบ (enrolled_seats ลดลง 1)
+            sections = db.query(ClassSection).filter(
+                ClassSection.course_id == course_id,
+                ClassSection.section_number == sec_num
+            ).all()
+            target_section = next((s for s in sections if get_section_type_from_room(s.room or "") == sec_type), None)
+            if target_section and target_section.enrolled_seats > 0:
+                target_section.enrolled_seats -= 1
+                db.commit()
+                
+    return {"message": "สละสิทธิ์สำเร็จ"}
+
+# 🌟 ฟังก์ชันสำหรับตรวจสอบที่นั่งว่างและแจกสิทธิ์ให้คนรอคิว
+def allocate_waitlist_seats():
+    db = SessionLocal()
+    try:
+        # 1. หาความสัมพันธ์ของวิชาที่มีคนรอคิว (PENDING) อยู่
+        pending_groups = db.query(
+            Waitlist.course_id, Waitlist.section_number, Waitlist.section_type
+        ).filter(Waitlist.status == WaitlistStatus.PENDING).distinct().all()
+
+        for course_id, sec_num, sec_type in pending_groups:
+            # 2. ดึง Section ทั้งหมดของวิชาและกลุ่มนั้น (มันอาจจะมีทั้ง T และ L ปนกันอยู่)
+            sections = db.query(ClassSection).filter(
+                ClassSection.course_id == course_id,
+                ClassSection.section_number == sec_num
+            ).all()
+            
+            # 🌟 แก้ไขตรงนี้: กรองเอาเฉพาะ Section ที่มี Type (T/L) ตรงกับที่เด็กกำลังเข้าคิวอยู่
+            target_section = None
+            for s in sections:
+                if get_section_type_from_room(s.room or "") == sec_type:
+                    target_section = s
+                    break
+
+            if target_section and target_section.enrolled_seats < target_section.max_seats:
+                # คำนวณที่ว่างที่มี
+                available_slots = target_section.max_seats - target_section.enrolled_seats
+                
+                # 3. ดึงคนรอคิวตามลำดับ (Queue Position)
+                next_in_line = db.query(Waitlist).filter(
+                    Waitlist.course_id == course_id,
+                    Waitlist.section_number == sec_num,
+                    Waitlist.section_type == sec_type,
+                    Waitlist.status == WaitlistStatus.PENDING
+                ).order_by(Waitlist.queue_position.asc()).limit(available_slots).all()
+
+                for entry in next_in_line:
+                    # 4. อัปเดตสถานะเป็น ALLOCATED
+                    entry.status = WaitlistStatus.ALLOCATED
+                    entry.allocated_at = datetime.datetime.utcnow()
+                    
+                    print(f"✅ Allocated seat for {entry.student_id} in {course_id} (Type: {sec_type})")
+
+        db.commit()
+    except Exception as e:
+        print(f"Error in allocation: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+ # ฟังก์ชันนี้จะทำงานอัตโนมัติเมื่อตอนเซิร์ฟเวอร์ FastAPI เริ่มรัน
+from apscheduler.schedulers.background import BackgroundScheduler
+
+@app.post("/students/{student_id}/push-token")
+def update_push_token(student_id: str, data: PushTokenUpdate, db: Session = Depends(get_db)):
+    # หาตัวนักศึกษาใน Database
+    student = db.query(Student).filter(Student.student_id == student_id).first()
+    
+    if not student:
+        raise HTTPException(status_code=404, detail="ไม่พบข้อมูลนักศึกษา")
+    
+    # อัปเดต Token ลง Database อัตโนมัติ
+    student.expo_push_token = data.push_token
+    db.commit()
+    
+    return {"status": "success", "message": "อัปเดต Push Token สำเร็จ"}
+
+
+
+scheduler = BackgroundScheduler()
+
+@app.on_event("startup")
+def startup_event():
+    # กำหนด Job ต่างๆ ของคุณตรงนี้
+    # scheduler.add_job(check_waitlist_timeout, 'interval', minutes=1)
+    
+    # สั่งเริ่มทำงาน
+    scheduler.start()
+    print("✅ Background Scheduler Started!")
+
+@app.on_event("shutdown")
+def shutdown_event():
+    # 🌟 2. พอ scheduler อยู่ด้านนอกแล้ว ฟังก์ชันนี้จะเรียกใช้ .shutdown() ได้โดยไม่ Error ครับ
+    if scheduler.running:
+        scheduler.shutdown()
+        print("🛑 Background Scheduler Stopped!")
+
+
+
+
 
 
 

@@ -1,5 +1,6 @@
 import datetime
-from sqlalchemy import Column, Integer, String, Time, ForeignKey, create_engine, Index , DateTime , Boolean
+import enum
+from sqlalchemy import Column, Integer, String, Time, ForeignKey, create_engine, Index , DateTime , Boolean, Enum
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship 
  
 #postgresql://postgres.xxxxxx:YourPassword123@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres         DATABASE_URL = "postgresql://postgres.hofziopcoimjevmelbuh:111333555777999BPM@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
@@ -30,7 +31,9 @@ class Student(Base):
     current_year = Column(Integer)
     current_semester = Column(Integer,default=1)
     #  password_hash = Column(String(255))  # 🔒 เพิ่มสำหรับระบบ Password ในอนาคต
+    expo_push_token = Column(String, nullable=True) # 🌟 เพิ่มตรงนี้
 
+    
 class Instructor(Base):
     __tablename__ = 'instructor'
     
@@ -152,6 +155,35 @@ class GradeRecord(Base):
     course_id = Column(String(20))
     grade = Column(String(5))
     semester = Column(String(10))
+
+# ---------------- ตาราง Waitlist (ลำดับรอลงทะเบียน) ----------------
+class WaitlistStatus(enum.Enum):
+    PENDING = "PENDING"      # กำลังรอคิว
+    ALLOCATED = "ALLOCATED"  # ได้สิทธิ์ลงทะเบียนแล้ว (รอการยืนยัน)
+    CONFIRMED = "CONFIRMED"  # ยืนยันการลงทะเบียนสำเร็จ
+    EXPIRED = "EXPIRED"      # หมดเวลาสิทธิ์การลงทะเบียน
+
+class Waitlist(Base):
+    __tablename__ = 'waitlist'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    student_id = Column(String(20), ForeignKey('student.student_id', ondelete="CASCADE"), nullable=False)
+    course_id = Column(String(20), ForeignKey('course.course_id', ondelete="CASCADE"), nullable=False)
+    section_number = Column(Integer, nullable=False)
+    section_type = Column(String(10))  # 'T' หรือ 'L'
+    status = Column(Enum(WaitlistStatus), default=WaitlistStatus.PENDING, nullable=False)
+    queue_position = Column(Integer, nullable=False)
+    allocated_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    # ความสัมพันธ์
+    student = relationship("Student")
+    course = relationship("Course")
+
+    __table_args__ = (
+        Index('ix_waitlist_student', 'student_id'),
+        Index('ix_waitlist_course_sec', 'course_id', 'section_number'),
+    )
 
 def get_db():
     db = SessionLocal()

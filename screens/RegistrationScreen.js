@@ -672,31 +672,6 @@ export default function RegistrationScreen({ student, setView }) {
                             >
                               {item.course_code}
                             </Text>
-                            {/* 🌟 เพิ่มป้ายบอก ปี และ เทอม */}
-                            {item.suggested_year && (
-                              <View
-                                style={{
-                                  backgroundColor: isSelected
-                                    ? "rgba(255,255,255,0.2)"
-                                    : "#ffe4ec",
-                                  paddingHorizontal: 6,
-                                  paddingVertical: 2,
-                                  borderRadius: 4,
-                                  marginLeft: 8,
-                                }}
-                              >
-                                <Text
-                                  style={{
-                                    fontSize: 10,
-                                    color: isSelected ? "#FFF" : "#a73355",
-                                    fontWeight: "bold",
-                                  }}
-                                >
-                                  ปี {item.suggested_year} เทอม{" "}
-                                  {item.suggested_semester}
-                                </Text>
-                              </View>
-                            )}
                           </View>
 
                           <Text
@@ -704,7 +679,7 @@ export default function RegistrationScreen({ student, setView }) {
                               styles.courseCode,
                               (isSelected || isLocked) && {
                                 color: isLocked ? "#D23669" : "#FFF",
-                                fontSize: 12,
+                                fontSize: 14,
                               },
                             ]}
                           >

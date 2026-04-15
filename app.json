@@ -24,6 +24,12 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "899c8a2d-1ed1-4992-89c8-70e482266b0b"
+      }
+    },
+    "owner": "chatpeth"
   }
 }

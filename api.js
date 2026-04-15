@@ -163,6 +163,27 @@ export const batchAddWithCheckAPI = (student_id, items) =>
 export const getStudentGradesAPI = (student_id) =>
   apiFetch(`/grades/${student_id}`, { method: "GET" });
 
+// --- Waitlist ---
+export const joinWaitlistAPI = (student_id, course_code, section_number, section_type) =>
+  apiFetch("/waitlist/join", {
+    method: "POST",
+    body: JSON.stringify({ 
+      student_id: String(student_id), 
+      course_code: String(course_code), 
+      section_number: parseInt(section_number),
+      section_type: section_type ? String(section_type) : "T" 
+    }),
+  });
+
+export const getWaitlistStatusAPI = (student_id) =>
+  apiFetch(`/waitlist/status/${student_id}`);
+
+export const confirmWaitlistSeatAPI = (waitlist_id) =>
+  apiFetch(`/waitlist/confirm/${waitlist_id}`, { method: "POST" });
+
+export const cancelWaitlistAPI = (waitlist_id) =>
+  apiFetch(`/waitlist/cancel/${waitlist_id}`, { method: "POST" });
+
 // --- Withdraw Course ---
 export const withdrawCourseAPI = (student_id, course_code, section_number, section_type) =>
   apiFetch("/enrollment/withdraw", {

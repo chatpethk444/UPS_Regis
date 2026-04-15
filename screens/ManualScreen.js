@@ -21,6 +21,7 @@ import {
   getCartAPI,
   getZOptionsAPI,
   getScheduleAPI,
+  joinWaitlistAPI,
 } from "../api";
 
 const { width } = Dimensions.get("window"); // 🌟 กำหนด width สำหรับ Modal
@@ -83,6 +84,31 @@ export default function ManualScreen({ student, setView }) {
     title: "",
     message: ""
   });
+
+  // 🌟 2. State สำหรับ Custom Modal แบบยืนยัน (Confirm Modal)
+  const [confirmModalVisible, setConfirmModalVisible] = useState(false);
+  const [confirmAction, setConfirmAction] = useState(null);
+  const [confirmDetail, setConfirmDetail] = useState({ title: "", message: "" });
+
+  // 🌟 ฟังก์ชันจัดการปุ่มกดต่อคิว
+  const handleJoinWaitlistPrompt = (course, section, sectionType) => {
+    setConfirmDetail({
+      title: "ยืนยันการต่อคิว",
+      message: `คุณต้องการเข้าคิวรายวิชา ${course.course_code} Sec ${section.section_number} (${sectionType === "T" ? "ทฤษฎี" : "ปฏิบัติ"}) ใช่หรือไม่?\n\nเมื่อถึงคิวของคุณ ระบบจะแจ้งเตือนและให้เวลา 30 นาทีในการยืนยันสิทธิ์`,
+    });
+    
+    setConfirmAction(() => async () => {
+      setConfirmModalVisible(false);
+      try {
+        await joinWaitlistAPI(student.student_id, course.course_code, section.section_number, sectionType);
+        showModal("เข้าคิวสำเร็จ", `คุณได้เข้าคิววิชา ${course.course_code} Sec ${section.section_number} เรียบร้อยแล้ว`, "success");
+      } catch (error) {
+        showModal("ไม่สำเร็จ", error.message || "ไม่สามารถต่อคิวได้", "error");
+      }
+    });
+    
+    setConfirmModalVisible(true);
+  };
 
   // 🌟 ฟังก์ชันเรียก Modal แจ้งเตือน
   const showModal = (title, message, type = "info") => {
@@ -310,7 +336,7 @@ export default function ManualScreen({ student, setView }) {
       >
         <View style={styles.sectionInfo}>
           <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionNumText}>Sec {sec.section_number}</Text>
+            <Text style={styles.sectionNumText}>กลุ่ม: {sec.section_number}</Text>
             <View
               style={[
                 styles.typeBadge,
@@ -323,7 +349,7 @@ export default function ManualScreen({ student, setView }) {
                   { color: isT ? "#a73355" : "#1a73e8" },
                 ]}
               >
-                {isT ? "Theory" : "Lab"}
+                {isT ? "ทฤษฎี " : "ปฏิบัติ "}
               </Text>
             </View>
           </View>
@@ -338,16 +364,23 @@ export default function ManualScreen({ student, setView }) {
             {isFull ? "(เต็ม)" : "(ว่าง)"}
           </Text>
         </View>
+        {/* 🌟 3. เปลี่ยนปุ่มจากเพิ่มลงตะกร้า เป็นปุ่มต่อคิวเมื่อที่นั่งเต็ม */}
         <TouchableOpacity
           style={[
             styles.addBtn,
-            { backgroundColor: isT ? "#D23669" : "#1a73e8" },
-            isFull && styles.addBtnDisabled,
+            isFull 
+              ? { backgroundColor: "#FF9800" } // สีส้มสำหรับปุ่มต่อคิว
+              : { backgroundColor: isT ? "#D23669" : "#1a73e8" },
           ]}
-          disabled={isFull}
-          onPress={() => handleAddSection(course, sec, displayType)}
+          onPress={() => 
+            isFull 
+              ? handleJoinWaitlistPrompt(course, sec, displayType) // ถ้าเต็มให้เรียกป๊อปอัปต่อคิว
+              : handleAddSection(course, sec, displayType)
+          }
         >
-          <Text style={styles.addBtnText}>เลือก</Text>
+          <Text style={styles.addBtnText}>
+            {isFull ? "ต่อคิว (Waitlist)" : "เลือก"}
+          </Text>
         </TouchableOpacity>
       </View>
     );
@@ -397,6 +430,39 @@ export default function ManualScreen({ student, setView }) {
                 </TouchableOpacity>
               </View>
               
+            </View>
+          </View>
+        </Modal>
+
+        {/* 🌟 4. Custom Confirm Modal สำหรับยืนยันการเข้าคิว */}
+        <Modal
+          animationType="fade"
+          transparent={true}
+          visible={confirmModalVisible}
+          onRequestClose={() => setConfirmModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={[styles.modalIconBg, { backgroundColor: '#FFF3E0' }]}>
+                <Feather name="clock" size={32} color="#FF9800" />
+              </View>
+              <Text style={styles.modalTitle}>{confirmDetail.title}</Text>
+              <Text style={styles.modalMessage}>{confirmDetail.message}</Text>
+              
+              <View style={[styles.modalButtonContainer, { gap: 10 }]}>
+                <TouchableOpacity
+                  style={[styles.modalButton, { backgroundColor: '#E0E0E0', flex: 1 }]}
+                  onPress={() => setConfirmModalVisible(false)}
+                >
+                  <Text style={[styles.confirmButtonText, { color: '#514345' }]}>ยกเลิก</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, { backgroundColor: '#FF9800', flex: 1 }]}
+                  onPress={confirmAction}
+                >
+                  <Text style={styles.confirmButtonText}>ยืนยันต่อคิว</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </Modal>

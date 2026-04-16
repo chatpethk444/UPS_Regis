@@ -11,6 +11,7 @@ engine = create_engine(
     pool_size=10,          # จำนวน connection สูงสุดใน pool
     max_overflow=20,       # connection เพิ่มเติมได้อีก 20
     pool_pre_ping=True,    # เช็ก connection ก่อนใช้ (ป้องกัน stale connection)
+    pool_recycle=300       # 🌟 ล้างท่อใหม่ทุกๆ 5 นาที
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()

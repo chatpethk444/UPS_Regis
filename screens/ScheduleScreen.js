@@ -80,12 +80,12 @@ export default function ScheduleScreen({ student, setView }) {
   // 🌟 State สำหรับ Custom Modal
   const [modalVisible, setModalVisible] = useState(false);
   const [pendingWithdraw, setPendingWithdraw] = useState(null);
-  
+
   // 🌟 เพิ่ม State จัดการรูปแบบการแสดงผลของ Modal (Confirm, Success, Error)
   const [modalConfig, setModalConfig] = useState({
     type: "confirm", // "confirm", "success", "error"
     title: "",
-    message: ""
+    message: "",
   });
 
   useEffect(() => {
@@ -125,10 +125,15 @@ export default function ScheduleScreen({ student, setView }) {
         // 🌟 แก้ไข: ไม่ต้องใช้ reduce เพื่อรวม (Merge) แล้ว ให้ใช้ map สร้าง Array ใหม่ไปเลย
         const processedSchedule = data.map((curr) => {
           const dayCurr = curr.day_of_week || curr.class_times?.[0]?.day;
-          const startCurr = parseTime(curr.start_time || curr.class_times?.[0]?.start);
-          const endCurr = parseTime(curr.end_time || curr.class_times?.[0]?.end);
+          const startCurr = parseTime(
+            curr.start_time || curr.class_times?.[0]?.start,
+          );
+          const endCurr = parseTime(
+            curr.end_time || curr.class_times?.[0]?.end,
+          );
 
-          let currentType = curr.section_type || curr.type || curr.class_times?.[0]?.type;
+          let currentType =
+            curr.section_type || curr.type || curr.class_times?.[0]?.type;
           if (!currentType) {
             currentType = endCurr - startCurr > 120 ? "L" : "T";
           }
@@ -214,9 +219,10 @@ export default function ScheduleScreen({ student, setView }) {
     setModalConfig({
       type: "confirm",
       title: "ยืนยันการถอน",
-      message: type === "multiple" 
-        ? `คุณต้องการถอนวิชาที่เลือกทั้งหมด (${selectedToWithdraw.length} รายการ) ใช่หรือไม่?`
-        : `คุณต้องการถอนวิชา ${data.code} (Sec ${data.secNum}) ใช่หรือไม่?`
+      message:
+        type === "multiple"
+          ? `คุณต้องการถอนวิชาที่เลือกทั้งหมด (${selectedToWithdraw.length} รายการ) ใช่หรือไม่?`
+          : `คุณต้องการถอนวิชา ${data.code} (Sec ${data.secNum}) ใช่หรือไม่?`,
     });
     setModalVisible(true);
   };
@@ -234,28 +240,32 @@ export default function ScheduleScreen({ student, setView }) {
           // แตก string ออกมา 3 ค่า
           const [code, secNum, secType] = id.split("|");
           // ส่งค่า secNum ไปให้ API ด้วย
-          promises.push(withdrawCourseAPI(student.student_id, code, secNum, secType));
+          promises.push(
+            withdrawCourseAPI(student.student_id, code, secNum, secType),
+          );
         });
       } else {
         const { code, secNum, combinedType } = data;
-        promises.push(withdrawCourseAPI(student.student_id, code, secNum, combinedType));
+        promises.push(
+          withdrawCourseAPI(student.student_id, code, secNum, combinedType),
+        );
       }
 
       await Promise.all(promises);
-      
+
       setModalConfig({
         type: "success",
         title: "สำเร็จ",
-        message: "ถอนรายวิชาเรียบร้อยแล้ว"
+        message: "ถอนรายวิชาเรียบร้อยแล้ว",
       });
       setModalVisible(true);
-      
+
       fetchSchedule(); // โหลดตารางใหม่
     } catch (e) {
       setModalConfig({
         type: "error",
         title: "ข้อผิดพลาด",
-        message: e.message
+        message: e.message,
       });
       setModalVisible(true);
       setLoading(false);
@@ -265,7 +275,6 @@ export default function ScheduleScreen({ student, setView }) {
   return (
     <LinearGradient colors={["#FFDAE4", "#FFF8F8"]} style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
-        
         {/* 🌟 Custom Modal ป็อปอัพที่แก้ไขให้ปุ่มไม่หายแล้ว */}
         <Modal
           animationType="fade"
@@ -275,22 +284,32 @@ export default function ScheduleScreen({ student, setView }) {
         >
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
-              
               {/* เปลี่ยนไอคอนและสีพื้นหลังตามสถานะ */}
-              <View style={[
-                styles.modalIconBg, 
-                { backgroundColor: modalConfig.type === 'success' ? '#E8F5E9' : '#FFEBEE' }
-              ]}>
-                <Feather 
-                  name={modalConfig.type === 'success' ? "check-circle" : modalConfig.type === 'error' ? "x-circle" : "alert-triangle"} 
-                  size={32} 
-                  color={modalConfig.type === 'success' ? "#4CAF50" : "#E53935"} 
+              <View
+                style={[
+                  styles.modalIconBg,
+                  {
+                    backgroundColor:
+                      modalConfig.type === "success" ? "#E8F5E9" : "#FFEBEE",
+                  },
+                ]}
+              >
+                <Feather
+                  name={
+                    modalConfig.type === "success"
+                      ? "check-circle"
+                      : modalConfig.type === "error"
+                        ? "x-circle"
+                        : "alert-triangle"
+                  }
+                  size={32}
+                  color={modalConfig.type === "success" ? "#4CAF50" : "#E53935"}
                 />
               </View>
-              
+
               <Text style={styles.modalTitle}>{modalConfig.title}</Text>
               <Text style={styles.modalMessage}>{modalConfig.message}</Text>
-              
+
               {/* 🌟 แก้ไขตรงนี้: ใส่ปุ่มลงใน Container เสมอ เพื่อไม่ให้ flex: 1 บีบปุ่มจนหายไป */}
               {modalConfig.type === "confirm" ? (
                 <View style={styles.modalButtonContainer}>
@@ -310,16 +329,21 @@ export default function ScheduleScreen({ student, setView }) {
               ) : (
                 <View style={styles.modalButtonContainer}>
                   <TouchableOpacity
-                    style={[styles.modalButton, { 
-                      backgroundColor: modalConfig.type === 'success' ? '#4CAF50' : '#E53935'
-                    }]}
+                    style={[
+                      styles.modalButton,
+                      {
+                        backgroundColor:
+                          modalConfig.type === "success"
+                            ? "#4CAF50"
+                            : "#E53935",
+                      },
+                    ]}
                     onPress={() => setModalVisible(false)}
                   >
                     <Text style={styles.confirmButtonText}>ตกลง</Text>
                   </TouchableOpacity>
                 </View>
               )}
-              
             </View>
           </View>
         </Modal>
@@ -517,9 +541,15 @@ export default function ScheduleScreen({ student, setView }) {
               {schedule.map((item, idx) => {
                 // 🌟 แก้ไข: ลอจิกแสดงชื่อประเภทเรียน ปรับให้ไม่ต้องเช็ค T+L รวมกันแล้ว
                 let typeLabel = "ทฤษฎี";
-                if (item.section_type === "L" || item.section_type?.includes("L")) {
+                if (
+                  item.section_type === "L" ||
+                  item.section_type?.includes("L")
+                ) {
                   typeLabel = "ปฏิบัติ";
-                } else if (item.section_type === "T" || item.section_type?.includes("T")) {
+                } else if (
+                  item.section_type === "T" ||
+                  item.section_type?.includes("T")
+                ) {
                   typeLabel = "ทฤษฎี";
                 }
 
@@ -536,15 +566,25 @@ export default function ScheduleScreen({ student, setView }) {
                     ]}
                     activeOpacity={0.8}
                     onPress={() =>
-                    toggleSelection(item.course_code, item.section_number, item.section_type)
+                      toggleSelection(
+                        item.course_code,
+                        item.section_number,
+                        item.section_type,
+                      )
                     }
                   >
                     <View style={styles.cardAccent} />
                     <View style={styles.cardBody}>
                       <View style={styles.cardTop}>
-                        <View style={{ flexDirection: "row", alignItems: "center" }}>
+                        <View
+                          style={{ flexDirection: "row", alignItems: "center" }}
+                        >
                           <MaterialIcons
-                            name={isSelected ? "check-box" : "check-box-outline-blank"}
+                            name={
+                              isSelected
+                                ? "check-box"
+                                : "check-box-outline-blank"
+                            }
                             size={22}
                             color={isSelected ? "#a73355" : "#ccc"}
                             style={{ marginRight: 8 }}

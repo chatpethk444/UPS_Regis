@@ -53,30 +53,33 @@ export const getZOptionsAPI = (student_id, z_course_code) =>
 // --- Cart ---
 // 🌟 เพิ่ม ?t=เวลาปัจจุบัน และใส่ Cache-Control
 export const getCartAPI = (student_id) =>
-  apiFetch(`/cart/${student_id}?t=${new Date().getTime()}`, { 
+  apiFetch(`/cart/${student_id}?t=${new Date().getTime()}`, {
     method: "GET",
-    headers: { "Cache-Control": "no-cache" }
+    headers: { "Cache-Control": "no-cache" },
   });
 
-
-
-export const addToCartAPI = (student_id, course_code, section_number, section_type) =>
+export const addToCartAPI = (
+  student_id,
+  course_code,
+  section_number,
+  section_type,
+) =>
   apiFetch("/cart/add", {
     method: "POST",
-    body: JSON.stringify({ 
-      student_id: String(student_id), 
-      course_code: String(course_code), 
+    body: JSON.stringify({
+      student_id: String(student_id),
+      course_code: String(course_code),
       section_number: String(section_number), // 🌟 แปลงเลข 1 เป็น "1" ป้องกัน 422
-      section_type: section_type ? String(section_type) : "T" 
+      section_type: section_type ? String(section_type) : "T",
     }),
   });
 
-  // ดึงข้อมูล Section ทั้งหมดของวิชานั้นๆ
+// ดึงข้อมูล Section ทั้งหมดของวิชานั้นๆ
 export const getCourseSectionsAPI = async (courseCode) => {
   // สมมติว่า Backend URL ของคุณคือ /courses/{courseCode}/sections
   // 💡(ถ้า URL หลังบ้านคุณตั้งเป็นแบบอื่น ให้เปลี่ยนตรงนี้ให้ตรงกันนะครับ)
-  return apiFetch(`/courses/${courseCode}/sections`, { 
-    method: "GET" 
+  return apiFetch(`/courses/${courseCode}/sections`, {
+    method: "GET",
   });
 };
 
@@ -84,10 +87,10 @@ export const getCourseSectionsAPI = async (courseCode) => {
 export const removeFromCartAPI = (student_id, course_code, section_type) =>
   apiFetch("/cart/remove", {
     method: "POST",
-    body: JSON.stringify({ 
-      student_id: String(student_id), 
+    body: JSON.stringify({
+      student_id: String(student_id),
       course_code: String(course_code),
-      section_type: section_type ? String(section_type) : "T"
+      section_type: section_type ? String(section_type) : "T",
     }),
   });
 
@@ -97,6 +100,22 @@ export const confirmEnrollmentAPI = (student_id) =>
 
 export const getScheduleAPI = (student_id) =>
   apiFetch(`/enroll/my/${student_id}`);
+
+export const withdrawCourseAPI = (
+  student_id,
+  course_code,
+  section_number,
+  section_type,
+) =>
+  apiFetch("/enrollment/withdraw", {
+    method: "POST",
+    body: JSON.stringify({
+      student_id,
+      course_code,
+      section_number,
+      section_type,
+    }),
+  });
 
 // --- AI ---
 export const aiSuggestAPI = (student_id, course_codes) =>
@@ -164,14 +183,19 @@ export const getStudentGradesAPI = (student_id) =>
   apiFetch(`/grades/${student_id}`, { method: "GET" });
 
 // --- Waitlist ---
-export const joinWaitlistAPI = (student_id, course_code, section_number, section_type) =>
+export const joinWaitlistAPI = (
+  student_id,
+  course_code,
+  section_number,
+  section_type,
+) =>
   apiFetch("/waitlist/join", {
     method: "POST",
-    body: JSON.stringify({ 
-      student_id: String(student_id), 
-      course_code: String(course_code), 
+    body: JSON.stringify({
+      student_id: String(student_id),
+      course_code: String(course_code),
       section_number: parseInt(section_number),
-      section_type: section_type ? String(section_type) : "T" 
+      section_type: section_type ? String(section_type) : "T",
     }),
   });
 
@@ -184,14 +208,26 @@ export const confirmWaitlistSeatAPI = (waitlist_id) =>
 export const cancelWaitlistAPI = (waitlist_id) =>
   apiFetch(`/waitlist/cancel/${waitlist_id}`, { method: "POST" });
 
-// --- Withdraw Course ---
-export const withdrawCourseAPI = (student_id, course_code, section_number, section_type) =>
-  apiFetch("/enrollment/withdraw", {
+// --- Admin ---
+export const getAdminConfigAPI = () =>
+  apiFetch("/admin/config", { method: "GET" });
+
+export const toggleRegistrationAPI = (admin_id) =>
+  apiFetch("/admin/toggle-registration", {
     method: "POST",
-    body: JSON.stringify({ 
-      student_id, 
-      course_code, 
-      section_number, 
-      section_type 
-    }),
+    body: JSON.stringify({ admin_id }),
+  });
+
+export const getMaintenanceStatusAPI = () =>
+  apiFetch("/admin/maintenance-status", { method: "GET" });
+
+export const toggleMaintenanceAPI = (admin_id) =>
+  apiFetch("/admin/toggle-maintenance", {
+    method: "POST",
+    body: JSON.stringify({ admin_id }),
+  });
+
+export const searchStudentsAPI = (query) =>
+  apiFetch(`/admin/students/search?query=${encodeURIComponent(query)}`, {
+    method: "GET",
   });

@@ -43,32 +43,31 @@ export const usePushNotifications = (student_id) => {
     }
 
     if (Device.isDevice) {
-      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      const { status: existingStatus } =
+        await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
-      
+
       if (existingStatus !== "granted") {
         const { status } = await Notifications.requestPermissionsAsync();
         finalStatus = status;
       }
-      
+
       if (finalStatus !== "granted") {
         alert("ไม่สามารถขอสิทธิ์แจ้งเตือนได้!");
         return;
       }
-      
+
       // ดึง Token ประจำเครื่อง
       token = (
         await Notifications.getExpoPushTokenAsync({
-          projectId: Constants.expoConfig.extra.eas.projectId, 
+          projectId: Constants.expoConfig.extra.eas.projectId,
         })
       ).data;
-      
+
       console.log("========== EXPO PUSH TOKEN ==========");
-      console.log(token); 
+      console.log(token);
       console.log("=====================================");
-    } else {
-      alert("Push Notifications ต้องใช้บนเครื่องจริงเท่านั้น (Emulator ใช้ไม่ได้)");
-    }
+    } 
 
     return token;
   }
@@ -77,8 +76,8 @@ export const usePushNotifications = (student_id) => {
   const updateTokenToBackend = async (id, token) => {
     try {
       await fetch(`http://10.175.15.135:8000/students/${id}/push-token`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ push_token: token }),
       });
       console.log(`✅ บันทึก Token อัตโนมัติสำเร็จสำหรับรหัส: ${id}`);

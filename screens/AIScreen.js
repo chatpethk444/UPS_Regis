@@ -85,8 +85,23 @@ export default function AIScreen({ student, setView }) {
   });
 
   // 🌟 2. Helper Function สำหรับเรียก Pop-up ใหม่
-  const showCustomAlert = (type, title, message, onConfirm = null, showCancel = false, confirmText = "ตกลง") => {
-    setModalConfig({ visible: true, type, title, message, onConfirm, showCancel, confirmText });
+  const showCustomAlert = (
+    type,
+    title,
+    message,
+    onConfirm = null,
+    showCancel = false,
+    confirmText = "ตกลง",
+  ) => {
+    setModalConfig({
+      visible: true,
+      type,
+      title,
+      message,
+      onConfirm,
+      showCancel,
+      confirmText,
+    });
   };
 
   const closeModal = () => {
@@ -96,7 +111,7 @@ export default function AIScreen({ student, setView }) {
   useEffect(() => {
     if (student) {
       const fetchAllData = async () => {
-        setLoadingCourses(true); 
+        setLoadingCourses(true);
         try {
           const [cartData, scheduleData, coursesData] = await Promise.all([
             getCartAPI(student.student_id).catch(() => []),
@@ -106,12 +121,12 @@ export default function AIScreen({ student, setView }) {
 
           const targetSemester = student.current_semester || 1;
 
-          const carts = Array.isArray(cartData) 
-            ? cartData.filter(c => c.suggested_semester == targetSemester) 
+          const carts = Array.isArray(cartData)
+            ? cartData.filter((c) => c.suggested_semester == targetSemester)
             : [];
           const scheds = Array.isArray(scheduleData) ? scheduleData : [];
-          const courses = Array.isArray(coursesData) 
-            ? coursesData.filter(c => c.suggested_semester == targetSemester) 
+          const courses = Array.isArray(coursesData)
+            ? coursesData.filter((c) => c.suggested_semester == targetSemester)
             : [];
 
           setCartItems(carts);
@@ -136,7 +151,7 @@ export default function AIScreen({ student, setView }) {
         } catch (error) {
           console.error("ดึงข้อมูลล้มเหลว:", error);
         } finally {
-          setLoadingCourses(false); 
+          setLoadingCourses(false);
         }
       };
 
@@ -166,9 +181,11 @@ export default function AIScreen({ student, setView }) {
     try {
       const data = await getAvailableCoursesAPI(student.student_id);
       const targetSemester = student.current_semester || 1;
-      
+
       setAvailableCourses(
-        Array.isArray(data) ? data.filter(c => c.suggested_semester == targetSemester) : []
+        Array.isArray(data)
+          ? data.filter((c) => c.suggested_semester == targetSemester)
+          : [],
       );
     } catch (err) {
       console.error(err);
@@ -178,7 +195,7 @@ export default function AIScreen({ student, setView }) {
   };
 
   const toggleCourse = (code) => {
-    if (!code) return; 
+    if (!code) return;
 
     const isSelected = selectedCodes.includes(code);
 
@@ -190,11 +207,19 @@ export default function AIScreen({ student, setView }) {
         scheduleCourseCodes.includes(code);
 
       if (inCart) {
-        showCustomAlert("warning", "ไม่สามารถเลือกได้", `รายวิชา ${code} มีอยู่ในตะกร้าของคุณแล้ว`);
+        showCustomAlert(
+          "warning",
+          "ไม่สามารถเลือกได้",
+          `รายวิชา ${code} มีอยู่ในตะกร้าของคุณแล้ว`,
+        );
         return;
       }
       if (inSchedule) {
-        showCustomAlert("warning", "ไม่สามารถเลือกได้", `รายวิชา ${code} มีอยู่ในตารางเรียนของคุณแล้ว`);
+        showCustomAlert(
+          "warning",
+          "ไม่สามารถเลือกได้",
+          `รายวิชา ${code} มีอยู่ในตารางเรียนของคุณแล้ว`,
+        );
         return;
       }
     }
@@ -222,14 +247,20 @@ export default function AIScreen({ student, setView }) {
   const handleAcceptSuggestion = async (plan) => {
     // 🌟 0. เช็คที่นั่งเต็มก่อนทำอย่างอื่น
     const fullCourses = plan.filter(
-      (item) => (item.max_seats || 0) > 0 && (item.enrolled_seats || 0) >= (item.max_seats || 0),
+      (item) =>
+        (item.max_seats || 0) > 0 &&
+        (item.enrolled_seats || 0) >= (item.max_seats || 0),
     );
 
     if (fullCourses.length > 0) {
       const courseNames = fullCourses
         .map((c) => `${c.course_code} (Sec ${c.section_number})`)
         .join(", ");
-      return showCustomAlert("error", "ไม่สามารถเลือกแผนนี้ได้", `วิชาต่อไปนี้ที่นั่งเต็มแล้ว: ${courseNames}\nกรุณาเลือกแผนอื่นหรือกดจัดใหม่`);
+      return showCustomAlert(
+        "error",
+        "ไม่สามารถเลือกแผนนี้ได้",
+        `วิชาต่อไปนี้ที่นั่งเต็มแล้ว: ${courseNames}\nกรุณาเลือกแผนอื่นหรือกดจัดใหม่`,
+      );
     }
 
     setCalculating(true);
@@ -438,12 +469,19 @@ export default function AIScreen({ student, setView }) {
             const pTime = `${c.pSlot.day} ${formatMins(c.pSlot.start)}-${formatMins(c.pSlot.end)}`;
             const exTime = `${c.exSlot.day} ${formatMins(c.exSlot.start)}-${formatMins(c.exSlot.end)}`;
 
-            errorMessage += `${idx + 1}. ⏰ เวลาชนกัน:\n   [AI แนะนำ] ${c.pCode} เรียน ${pTime}\n   [${c.source}] ${c.exCode} เรียน ${exTime}\n\n`;
+            errorMessage += `${idx + 1}. ⏰ เวลาชนกัน:\n   [ระบบ แนะนำ] ${c.pCode} เรียน ${pTime}\n   [${c.source}] ${c.exCode} เรียน ${exTime}\n\n`;
           }
         });
 
         // ✅ เรียก Custom Error Pop-up
-        showCustomAlert("error", "ไม่สามารถลงทะเบียนได้", errorMessage + "โปรดเลือก Plan อื่น หรือ ลบวิชาที่ชนกันออก", null, false, "เข้าใจแล้ว");
+        showCustomAlert(
+          "error",
+          "ไม่สามารถลงทะเบียนได้",
+          errorMessage + "โปรดเลือก Plan อื่น หรือ ลบวิชาที่ชนกันออก",
+          null,
+          false,
+          "เข้าใจแล้ว",
+        );
         return;
       }
 
@@ -481,7 +519,11 @@ export default function AIScreen({ student, setView }) {
       const data = await res.json();
 
       if (data.status === "conflict") {
-        showCustomAlert("error", "พบเวลาเรียนชนกันจากระบบหลังบ้าน!", "กรุณาเคลียร์วิชาในตะกร้าออกก่อน");
+        showCustomAlert(
+          "error",
+          "พบเวลาเรียนชนกันจากระบบหลังบ้าน!",
+          "กรุณาเคลียร์วิชาในตะกร้าออกก่อน",
+        );
         return;
       }
 
@@ -490,8 +532,12 @@ export default function AIScreen({ student, setView }) {
       }
 
       // ✅ เรียก Custom Success Pop-up
-      showCustomAlert("success", "สำเร็จ!", "เพิ่มแผนการเรียนที่เลือก ลงตะกร้าเรียบร้อยแล้ว", () => setView("CART"));
-      
+      showCustomAlert(
+        "success",
+        "สำเร็จ!",
+        "เพิ่มแผนการเรียนที่เลือก ลงตะกร้าเรียบร้อยแล้ว",
+        () => setView("CART"),
+      );
     } catch (err) {
       showCustomAlert("error", "ข้อผิดพลาด", err.message);
     } finally {
@@ -549,21 +595,31 @@ export default function AIScreen({ student, setView }) {
       const major = student.major || "";
 
       if (major.includes("วิศวกรรมคอมพิวเตอร์")) {
-        filteredOptions = filteredOptions.filter(c => !c.course_code.startsWith("CPE"));
+        filteredOptions = filteredOptions.filter(
+          (c) => !c.course_code.startsWith("CPE"),
+        );
       } else if (major.includes("เทคโนโลยีสารสนเทศ")) {
-        filteredOptions = filteredOptions.filter(c => !c.course_code.startsWith("ICT"));
+        filteredOptions = filteredOptions.filter(
+          (c) => !c.course_code.startsWith("ICT"),
+        );
       } else if (major.includes("โลจิสติกส์") || major.includes("โซ่อุปทาน")) {
-        filteredOptions = filteredOptions.filter(c => !c.course_code.startsWith("LSM"));
+        filteredOptions = filteredOptions.filter(
+          (c) => !c.course_code.startsWith("LSM"),
+        );
       }
 
       // 🌟 2. กำจัดวิชาที่ซ้ำกัน (ป้องกัน Error: two children with the same key)
       const uniqueOptions = Array.from(
-        new Map(filteredOptions.map((opt) => [opt.course_code, opt])).values()
+        new Map(filteredOptions.map((opt) => [opt.course_code, opt])).values(),
       );
 
       setZOptions(uniqueOptions);
     } catch (error) {
-      showCustomAlert("error", "ข้อผิดพลาด", "ไม่สามารถดึงข้อมูลรายวิชาทดแทนได้");
+      showCustomAlert(
+        "error",
+        "ข้อผิดพลาด",
+        "ไม่สามารถดึงข้อมูลรายวิชาทดแทนได้",
+      );
     } finally {
       setZLoading(false);
     }
@@ -577,7 +633,11 @@ export default function AIScreen({ student, setView }) {
         cartCourseCodes.includes(codeToCheck) ||
         scheduleCourseCodes.includes(codeToCheck)
       ) {
-        showCustomAlert("warning", "ไม่สามารถเลือกได้", "คุณมีวิชานี้อยู่ในตะกร้าหรือตารางเรียนแล้ว!");
+        showCustomAlert(
+          "warning",
+          "ไม่สามารถเลือกได้",
+          "คุณมีวิชานี้อยู่ในตะกร้าหรือตารางเรียนแล้ว!",
+        );
         return;
       }
 
@@ -602,7 +662,11 @@ export default function AIScreen({ student, setView }) {
       setSelectedCodes(newSelected);
 
       setZModalVisible(false);
-      showCustomAlert("success", "สำเร็จ", `เลือกวิชา ${selectedCourse.course_code} เรียบร้อย`);
+      showCustomAlert(
+        "success",
+        "สำเร็จ",
+        `เลือกวิชา ${selectedCourse.course_code} เรียบร้อย`,
+      );
     } catch (error) {
       showCustomAlert("error", "ข้อผิดพลาด", "ตรวจสอบข้อมูลล้มเหลว");
     }
@@ -640,7 +704,7 @@ export default function AIScreen({ student, setView }) {
             <View style={styles.heroTextContainer}>
               <Text style={styles.heroTitle}>ระบบจัดตารางเรียนอัจฉริยะ</Text>
               <Text style={styles.heroSubtitle}>
-                ให้ AI ช่วยวิเคราะห์และจัดแผนการเรียนที่ดีที่สุด
+                ให้ ระบบ ช่วยวิเคราะห์และจัดแผนการเรียนที่ดีที่สุด
                 สำหรับคุณในภาคเรียนนี้
               </Text>
             </View>
@@ -837,7 +901,7 @@ export default function AIScreen({ student, setView }) {
                                 item.section_number || item.sec || "1",
                               );
                               const secType =
-                                item.section_type || item.type || "T"; 
+                                item.section_type || item.type || "T";
 
                               let remainSeatsText = "";
 
@@ -852,9 +916,13 @@ export default function AIScreen({ student, setView }) {
                                     (s) => s.section_type === secType,
                                   ) || slots[0];
 
-                                if (targetSlot && targetSlot.max_seats != null) {
+                                if (
+                                  targetSlot &&
+                                  targetSlot.max_seats != null
+                                ) {
                                   const cap = Number(targetSlot.max_seats) || 0;
-                                  const enr = Number(targetSlot.enrolled_seats) || 0;
+                                  const enr =
+                                    Number(targetSlot.enrolled_seats) || 0;
                                   const remain = cap - enr;
                                   remainSeatsText = `  |  ว่าง: ${remain > 0 ? remain : 0}/${cap}`;
                                 }
@@ -922,13 +990,15 @@ export default function AIScreen({ student, setView }) {
                                         styles.metaText,
                                         {
                                           color:
-                                            item.enrolled_seats >= item.max_seats
+                                            item.enrolled_seats >=
+                                            item.max_seats
                                               ? "red"
                                               : "#837375",
                                         },
                                       ]}
                                     >
-                                      ที่นั่ง: {item.enrolled_seats ?? 0}/{item.max_seats ?? 0}
+                                      ที่นั่ง: {item.enrolled_seats ?? 0}/
+                                      {item.max_seats ?? 0}
                                     </Text>
                                   </View>
                                 </TouchableOpacity>
@@ -1139,14 +1209,14 @@ export default function AIScreen({ student, setView }) {
                   data={zOptions}
                   keyExtractor={(item, index) => `${item.course_code}-${index}`}
                   renderItem={({ item }) => (
-                    <View 
+                    <View
                       style={[
-                        styles.zCourseCard, 
-                        { 
-                          flexDirection: 'row',
-                          alignItems: 'center',
-                          justifyContent: 'space-between'
-                        }
+                        styles.zCourseCard,
+                        {
+                          flexDirection: "row",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                        },
                       ]}
                     >
                       <View style={{ flex: 1, marginRight: 12 }}>
@@ -1170,7 +1240,13 @@ export default function AIScreen({ student, setView }) {
                         }}
                         onPress={() => handleSelectZOption(item)}
                       >
-                        <Text style={{ color: "#fff", fontWeight: "bold", fontSize: 14 }}>
+                        <Text
+                          style={{
+                            color: "#fff",
+                            fontWeight: "bold",
+                            fontSize: 14,
+                          }}
+                        >
                           เลือกวิชานี้
                         </Text>
                       </TouchableOpacity>
@@ -1186,24 +1262,30 @@ export default function AIScreen({ student, setView }) {
         <Modal visible={modalConfig.visible} transparent animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.modalBox}>
-              
-              <LinearGradient 
+              <LinearGradient
                 colors={
-                  modalConfig.type === 'success' ? ['#22c55e', '#16a34a'] :
-                  modalConfig.type === 'error' ? ['#ef4444', '#dc2626'] :
-                  modalConfig.type === 'warning' ? ['#f59e0b', '#d97706'] :
-                  ['#a73355', '#87193e'] // แบบ Confirm ใช้สีแอป
-                } 
+                  modalConfig.type === "success"
+                    ? ["#22c55e", "#16a34a"]
+                    : modalConfig.type === "error"
+                      ? ["#ef4444", "#dc2626"]
+                      : modalConfig.type === "warning"
+                        ? ["#f59e0b", "#d97706"]
+                        : ["#a73355", "#87193e"] // แบบ Confirm ใช้สีแอป
+                }
                 style={styles.modalCircle}
               >
-                <MaterialIcons 
+                <MaterialIcons
                   name={
-                    modalConfig.type === 'success' ? "check" :
-                    modalConfig.type === 'error' ? "close" :
-                    modalConfig.type === 'warning' ? "priority-high" :
-                    "help-outline"
-                  } 
-                  size={40} color="white" 
+                    modalConfig.type === "success"
+                      ? "check"
+                      : modalConfig.type === "error"
+                        ? "close"
+                        : modalConfig.type === "warning"
+                          ? "priority-high"
+                          : "help-outline"
+                  }
+                  size={40}
+                  color="white"
                 />
               </LinearGradient>
 
@@ -1212,35 +1294,46 @@ export default function AIScreen({ student, setView }) {
 
               <View style={styles.modalButtonRow}>
                 {modalConfig.showCancel && (
-                  <TouchableOpacity style={styles.modalCancelBtn} onPress={closeModal}>
+                  <TouchableOpacity
+                    style={styles.modalCancelBtn}
+                    onPress={closeModal}
+                  >
                     <Text style={styles.modalCancelText}>ยกเลิก</Text>
                   </TouchableOpacity>
                 )}
 
-                <TouchableOpacity 
-                  style={[styles.modalConfirmBtn, !modalConfig.showCancel && { flex: 0, paddingHorizontal: 40 }]} 
+                <TouchableOpacity
+                  style={[
+                    styles.modalConfirmBtn,
+                    !modalConfig.showCancel && {
+                      flex: 0,
+                      paddingHorizontal: 40,
+                    },
+                  ]}
                   onPress={() => {
                     closeModal(); // ปิด Modal ทันที
                     if (modalConfig.onConfirm) modalConfig.onConfirm(); // สั่งรันฟังก์ชันต่อ
                   }}
                 >
-                  <LinearGradient 
+                  <LinearGradient
                     colors={
-                      modalConfig.type === 'error' ? ['#ef4444', '#dc2626'] :
-                      modalConfig.type === 'warning' ? ['#f59e0b', '#d97706'] :
-                      ['#D23669', '#a73355']
-                    } 
+                      modalConfig.type === "error"
+                        ? ["#ef4444", "#dc2626"]
+                        : modalConfig.type === "warning"
+                          ? ["#f59e0b", "#d97706"]
+                          : ["#D23669", "#a73355"]
+                    }
                     style={styles.modalGradientBtn}
                   >
-                    <Text style={styles.modalConfirmText}>{modalConfig.confirmText}</Text>
+                    <Text style={styles.modalConfirmText}>
+                      {modalConfig.confirmText}
+                    </Text>
                   </LinearGradient>
                 </TouchableOpacity>
               </View>
-
             </View>
           </View>
         </Modal>
-
       </SafeAreaView>
     </LinearGradient>
   );
@@ -1379,7 +1472,7 @@ const styles = StyleSheet.create({
   detailCard: {
     backgroundColor: "#FFFFFF",
     borderRadius: 16,
-    padding: 16, 
+    padding: 16,
     marginBottom: 12,
     borderWidth: 1,
     borderColor: "#F0F0F0",
@@ -1401,15 +1494,15 @@ const styles = StyleSheet.create({
     color: "#1f1a1c",
   },
   secBadge: {
-    backgroundColor: "#D23669", 
+    backgroundColor: "#D23669",
     paddingHorizontal: 12,
     paddingVertical: 4,
-    borderRadius: 16, 
+    borderRadius: 16,
   },
   secBadgeText: {
     fontSize: 12,
     fontWeight: "bold",
-    color: "#FFFFFF", 
+    color: "#FFFFFF",
   },
   detailName: {
     fontSize: 14,
@@ -1435,10 +1528,10 @@ const styles = StyleSheet.create({
   dayGroupContainer: {
     backgroundColor: "#FFFFFF",
     marginBottom: 20,
-    borderRadius: 16, 
+    borderRadius: 16,
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: "#FDEEF4", 
+    borderColor: "#FDEEF4",
     elevation: 2,
     shadowColor: "#9c3b5b",
     shadowOffset: { width: 0, height: 2 },
@@ -1446,7 +1539,7 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
   },
   dayGroupHeader: {
-    backgroundColor: "#a73355", 
+    backgroundColor: "#a73355",
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
@@ -1455,13 +1548,13 @@ const styles = StyleSheet.create({
   },
   dayGroupTitle: {
     fontSize: 18,
-    fontWeight: "900", 
+    fontWeight: "900",
     color: "#FFFFFF",
   },
   dayGroupCount: {
     fontSize: 12,
     fontWeight: "600",
-    color: "#FFDAE4", 
+    color: "#FFDAE4",
   },
   dayGroupBody: {
     paddingTop: 16,
@@ -1472,15 +1565,15 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   timelineTimeCol: {
-    width: 80, 
+    width: 80,
     paddingLeft: 12,
     alignItems: "flex-end",
   },
   timelineTimeText: {
     fontSize: 12,
     fontWeight: "600",
-    color: "#837375", 
-    marginTop: -2, 
+    color: "#837375",
+    marginTop: -2,
   },
   timelineCenterCol: {
     width: 30,
@@ -1491,15 +1584,15 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: "#D23669", 
+    backgroundColor: "#D23669",
     zIndex: 2,
   },
   timelineLine: {
     position: "absolute",
     top: 8,
-    bottom: -24, 
+    bottom: -24,
     width: 2,
-    backgroundColor: "#FDEEF4", 
+    backgroundColor: "#FDEEF4",
     zIndex: 1,
   },
   timelineDetailCol: {
@@ -1510,13 +1603,13 @@ const styles = StyleSheet.create({
   timelineCodeText: {
     fontSize: 15,
     fontWeight: "600",
-    color: "#1f1a1c", 
+    color: "#1f1a1c",
     marginBottom: 6,
     marginTop: -4,
   },
   timelineSubText: {
     fontSize: 12,
-    color: "#514345", 
+    color: "#514345",
     marginBottom: 4,
     lineHeight: 18,
   },
@@ -1654,72 +1747,72 @@ const styles = StyleSheet.create({
   // 🌟 Styles สำหรับ Custom Pop-up อัจฉริยะ 🌟
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20
+    backgroundColor: "rgba(0,0,0,0.6)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
   },
   modalBox: {
-    width: '90%',
-    backgroundColor: 'white',
+    width: "90%",
+    backgroundColor: "white",
     borderRadius: 30,
     padding: 30,
-    alignItems: 'center',
-    elevation: 10
+    alignItems: "center",
+    elevation: 10,
   },
   modalCircle: {
     width: 80,
     height: 80,
     borderRadius: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 20,
   },
   modalTitleText: {
     fontSize: 22,
-    fontWeight: '900',
-    color: '#1f1a1c',
+    fontWeight: "900",
+    color: "#1f1a1c",
     marginBottom: 10,
-    textAlign: 'center'
+    textAlign: "center",
   },
   modalDescText: {
     fontSize: 14,
-    color: '#514345',
-    textAlign: 'center',
+    color: "#514345",
+    textAlign: "center",
     marginBottom: 25,
-    lineHeight: 22
+    lineHeight: 22,
   },
   modalButtonRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 12,
-    width: '100%',
-    justifyContent: 'center'
+    width: "100%",
+    justifyContent: "center",
   },
   modalCancelBtn: {
     flex: 1,
     paddingVertical: 14,
-    alignItems: 'center',
+    alignItems: "center",
     borderRadius: 15,
-    backgroundColor: '#F3F4F6'
+    backgroundColor: "#F3F4F6",
   },
   modalCancelText: {
-    color: '#6B7280',
-    fontWeight: 'bold',
-    fontSize: 15
+    color: "#6B7280",
+    fontWeight: "bold",
+    fontSize: 15,
   },
   modalConfirmBtn: {
     flex: 1,
     borderRadius: 15,
-    overflow: 'hidden'
+    overflow: "hidden",
   },
   modalGradientBtn: {
     paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center'
+    alignItems: "center",
+    justifyContent: "center",
   },
   modalConfirmText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 15
-  }
+    color: "white",
+    fontWeight: "bold",
+    fontSize: 15,
+  },
 });

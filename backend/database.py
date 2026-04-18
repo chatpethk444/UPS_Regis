@@ -34,7 +34,14 @@ class Student(Base):
     #  password_hash = Column(String(255))  # 🔒 เพิ่มสำหรับระบบ Password ในอนาคต
     expo_push_token = Column(String, nullable=True) # 🌟 เพิ่มตรงนี้
 
-    
+class Admin(Base):
+    __tablename__ = 'admin'
+    admin_id = Column(String(20), primary_key=True)
+    name = Column(String(100))
+    email = Column(String(100))
+    avatar_url = Column(String(255))
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
 class Instructor(Base):
     __tablename__ = 'instructor'
     
@@ -185,6 +192,20 @@ class Waitlist(Base):
         Index('ix_waitlist_student', 'student_id'),
         Index('ix_waitlist_course_sec', 'course_id', 'section_number'),
     )
+
+# ---------------- ตารางการตั้งค่าระบบ ----------------
+class SystemConfig(Base):
+    __tablename__ = 'system_config'
+    key = Column(String(50), primary_key=True)
+    value = Column(String(255))
+
+class SystemLog(Base):
+    __tablename__ = 'system_log'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    admin_id = Column(String(20))
+    action = Column(String(255))
+    details = Column(String(500))
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 def get_db():
     db = SessionLocal()

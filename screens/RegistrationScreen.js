@@ -97,7 +97,13 @@ export default function RegistrationScreen({ student, setView }) {
   });
 
   // 🌟 ฟังก์ชันเรียกใช้ป็อปอัพแทน Alert.alert
-  const showModal = (title, message, type = "info", onConfirm = null, confirmText = "ตกลง") => {
+  const showModal = (
+    title,
+    message,
+    type = "info",
+    onConfirm = null,
+    confirmText = "ตกลง",
+  ) => {
     setModalConfig({ title, message, type, onConfirm, confirmText });
     setModalVisible(true);
   };
@@ -149,11 +155,19 @@ export default function RegistrationScreen({ student, setView }) {
   const toggleCourse = (code) => {
     if (enrolledCourseCodes.includes(code)) {
       // 🌟 เปลี่ยน Alert เป็น showModal
-      return showModal("ไม่สามารถเลือกได้", "คุณลงทะเบียนวิชานี้ไปแล้ว", "warning");
+      return showModal(
+        "ไม่สามารถเลือกได้",
+        "คุณลงทะเบียนวิชานี้ไปแล้ว",
+        "warning",
+      );
     }
     if (cartCourseCodes.includes(code)) {
       // 🌟 เปลี่ยน Alert เป็น showModal
-      return showModal("ไม่สามารถเลือกได้", "วิชานี้อยู่ในตะกร้าแล้ว", "warning");
+      return showModal(
+        "ไม่สามารถเลือกได้",
+        "วิชานี้อยู่ในตะกร้าแล้ว",
+        "warning",
+      );
     }
     setSelectedCodes((prev) =>
       prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code],
@@ -188,7 +202,7 @@ export default function RegistrationScreen({ student, setView }) {
       return showModal(
         "ไม่สามารถเลือกแผนนี้ได้",
         `วิชาต่อไปนี้ที่นั่งเต็มแล้ว: ${courseNames}\nกรุณาเลือกแผนอื่นหรือกดจัดใหม่`,
-        "error"
+        "error",
       );
     }
 
@@ -206,16 +220,16 @@ export default function RegistrationScreen({ student, setView }) {
         showModal(
           "พบเวลาเรียนชนกัน",
           "กรุณาเคลียร์วิชาในตะกร้าหรือเลือกแผนอื่น",
-          "warning"
+          "warning",
         );
       } else {
         // 🌟 เปลี่ยน Alert เป็น showModal พร้อม Callback นำทางไปตะกร้า
         showModal(
-          "สำเร็จ", 
-          "เพิ่มแผนการเรียนลงตะกร้าเรียบร้อยแล้ว", 
-          "success", 
-          () => setView("CART"), 
-          "ไปที่ตะกร้า"
+          "สำเร็จ",
+          "เพิ่มแผนการเรียนลงตะกร้าเรียบร้อยแล้ว",
+          "success",
+          () => setView("CART"),
+          "ไปที่ตะกร้า",
         );
       }
     } catch (e) {
@@ -262,10 +276,14 @@ export default function RegistrationScreen({ student, setView }) {
   // 🌟 ฟังก์ชันเลือกไอคอนและสีตามประเภทป็อปอัพ
   const getModalStyleConfig = () => {
     switch (modalConfig.type) {
-      case "success": return { icon: "check-circle", color: "#4CAF50", bgColor: "#E8F5E9" };
-      case "error": return { icon: "x-circle", color: "#F44336", bgColor: "#FFEBEE" };
-      case "warning": return { icon: "alert-triangle", color: "#FF9800", bgColor: "#FFF3E0" };
-      default: return { icon: "info", color: "#2196F3", bgColor: "#E3F2FD" };
+      case "success":
+        return { icon: "check-circle", color: "#4CAF50", bgColor: "#E8F5E9" };
+      case "error":
+        return { icon: "x-circle", color: "#F44336", bgColor: "#FFEBEE" };
+      case "warning":
+        return { icon: "alert-triangle", color: "#FF9800", bgColor: "#FFF3E0" };
+      default:
+        return { icon: "info", color: "#2196F3", bgColor: "#E3F2FD" };
     }
   };
 
@@ -274,7 +292,6 @@ export default function RegistrationScreen({ student, setView }) {
   return (
     <LinearGradient colors={["#FFDAE4", "#FFF8F8"]} style={styles.container}>
       <SafeAreaView style={{ flex: 1 }}>
-
         {/* 🌟 Custom Modal ป็อปอัพสวยๆ แทรกตรงนี้ */}
         <Modal
           animationType="fade"
@@ -284,16 +301,30 @@ export default function RegistrationScreen({ student, setView }) {
         >
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
-              <View style={[styles.modalIconBg, { backgroundColor: modalStyle.bgColor }]}>
-                <Feather name={modalStyle.icon} size={32} color={modalStyle.color} />
+              <View
+                style={[
+                  styles.modalIconBg,
+                  { backgroundColor: modalStyle.bgColor },
+                ]}
+              >
+                <Feather
+                  name={modalStyle.icon}
+                  size={32}
+                  color={modalStyle.color}
+                />
               </View>
               <Text style={styles.modalTitle}>{modalConfig.title}</Text>
               <Text style={styles.modalMessage}>{modalConfig.message}</Text>
               <TouchableOpacity
-                style={[styles.modalButton, { backgroundColor: modalStyle.color }]}
+                style={[
+                  styles.modalButton,
+                  { backgroundColor: modalStyle.color },
+                ]}
                 onPress={handleModalConfirm}
               >
-                <Text style={styles.modalButtonText}>{modalConfig.confirmText}</Text>
+                <Text style={styles.modalButtonText}>
+                  {modalConfig.confirmText}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -523,7 +554,8 @@ export default function RegistrationScreen({ student, setView }) {
                                     item.section_number || "1",
                                   );
                                   const secType = item.section_type || "T";
-                                  const enrolledSeats = item.enrolled_seats ?? 0;
+                                  const enrolledSeats =
+                                    item.enrolled_seats ?? 0;
                                   const maxSeats = item.max_seats ?? 0;
 
                                   return (
@@ -562,7 +594,8 @@ export default function RegistrationScreen({ student, setView }) {
                                           style={styles.timelineNameText}
                                           numberOfLines={1}
                                         >
-                                          {courseInfo?.course_name || "ไม่มีชื่อวิชา"}
+                                          {courseInfo?.course_name ||
+                                            "ไม่มีชื่อวิชา"}
                                         </Text>
                                         <Text style={styles.timelineSubText}>
                                           กลุ่ม: {secNum}
@@ -573,19 +606,14 @@ export default function RegistrationScreen({ student, setView }) {
                                               styles.metaText,
                                               {
                                                 color:
-                                                  maxSeats -
-                                                    enrolledSeats <=
-                                                  0
+                                                  maxSeats - enrolledSeats <= 0
                                                     ? "red"
                                                     : "#837375",
                                               },
                                             ]}
                                           >
-                                            ที่นั่ง: {enrolledSeats}/
-                                            {maxSeats} (ว่าง{" "}
-                                            {maxSeats -
-                                              enrolledSeats}
-                                            )
+                                            ที่นั่ง: {enrolledSeats}/{maxSeats}{" "}
+                                            (ว่าง {maxSeats - enrolledSeats})
                                           </Text>
                                         )}
                                       </View>
@@ -616,7 +644,7 @@ export default function RegistrationScreen({ student, setView }) {
             ) : (
               <View>
                 <Text style={styles.infoText}>
-                  เลือกวิชาบังคับ/แนะนำ เพื่อให้ AI จัดแผนให้
+                  เลือกวิชาบังคับ/แนะนำ เพื่อให้ ระบบ จัดแผนให้
                 </Text>
                 {courses.map((item) => {
                   const inCart = cartCourseCodes.includes(item.course_code);

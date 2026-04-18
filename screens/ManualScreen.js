@@ -10,7 +10,7 @@ import {
   SafeAreaView,
   StyleSheet,
   Dimensions, // 🌟 เพิ่ม Dimensions
-  Modal,      // 🌟 เพิ่ม Modal
+  Modal, // 🌟 เพิ่ม Modal
 } from "react-native";
 import { MaterialIcons, Feather } from "@expo/vector-icons"; // 🌟 เพิ่ม Feather
 import { LinearGradient } from "expo-linear-gradient";
@@ -27,23 +27,29 @@ import {
 const { width } = Dimensions.get("window"); // 🌟 กำหนด width สำหรับ Modal
 
 // 🌟 Helper Function สำหรับจัดเรียง Section (เรียงเลข Sec ก่อน แล้วเอา Theory ขึ้นก่อน Lab)
-  const sortSectionsArray = (sections) => {
-    if (!sections) return [];
-    return [...sections].sort((a, b) => {
-      // 1. เรียงตาม Sec Number (น้อยไปมาก)
-      const secA = parseInt(a.section_number) || 0;
-      const secB = parseInt(b.section_number) || 0;
-      if (secA !== secB) return secA - secB;
+const sortSectionsArray = (sections) => {
+  if (!sections) return [];
+  return [...sections].sort((a, b) => {
+    // 1. เรียงตาม Sec Number (น้อยไปมาก)
+    const secA = parseInt(a.section_number) || 0;
+    const secB = parseInt(b.section_number) || 0;
+    if (secA !== secB) return secA - secB;
 
-      // 2. ถ้า Sec Number เท่ากัน ให้เช็กว่าเป็น Lab หรือ Theory
-      const isLabA = a.type === "L" || a.section_type === "L" || (a.room && String(a.room).toLowerCase().includes("lab"));
-      const isLabB = b.type === "L" || b.section_type === "L" || (b.room && String(b.room).toLowerCase().includes("lab"));
+    // 2. ถ้า Sec Number เท่ากัน ให้เช็กว่าเป็น Lab หรือ Theory
+    const isLabA =
+      a.type === "L" ||
+      a.section_type === "L" ||
+      (a.room && String(a.room).toLowerCase().includes("lab"));
+    const isLabB =
+      b.type === "L" ||
+      b.section_type === "L" ||
+      (b.room && String(b.room).toLowerCase().includes("lab"));
 
-      if (!isLabA && isLabB) return -1; // A (Theory) มาก่อน B (Lab)
-      if (isLabA && !isLabB) return 1;  // B (Theory) มาก่อน A (Lab)
-      return 0;
-    });
-  };
+    if (!isLabA && isLabB) return -1; // A (Theory) มาก่อน B (Lab)
+    if (isLabA && !isLabB) return 1; // B (Theory) มาก่อน A (Lab)
+    return 0;
+  });
+};
 
 // ✅ แยก api.js ให้รับ section_type ด้วย
 async function addToCartWithType(
@@ -82,13 +88,16 @@ export default function ManualScreen({ student, setView }) {
   const [modalConfig, setModalConfig] = useState({
     type: "info", // "success", "error", "warning"
     title: "",
-    message: ""
+    message: "",
   });
 
   // 🌟 2. State สำหรับ Custom Modal แบบยืนยัน (Confirm Modal)
   const [confirmModalVisible, setConfirmModalVisible] = useState(false);
   const [confirmAction, setConfirmAction] = useState(null);
-  const [confirmDetail, setConfirmDetail] = useState({ title: "", message: "" });
+  const [confirmDetail, setConfirmDetail] = useState({
+    title: "",
+    message: "",
+  });
 
   // 🌟 ฟังก์ชันจัดการปุ่มกดต่อคิว
   const handleJoinWaitlistPrompt = (course, section, sectionType) => {
@@ -96,17 +105,26 @@ export default function ManualScreen({ student, setView }) {
       title: "ยืนยันการต่อคิว",
       message: `คุณต้องการเข้าคิวรายวิชา ${course.course_code} Sec ${section.section_number} (${sectionType === "T" ? "ทฤษฎี" : "ปฏิบัติ"}) ใช่หรือไม่?\n\nเมื่อถึงคิวของคุณ ระบบจะแจ้งเตือนและให้เวลา 30 นาทีในการยืนยันสิทธิ์`,
     });
-    
+
     setConfirmAction(() => async () => {
       setConfirmModalVisible(false);
       try {
-        await joinWaitlistAPI(student.student_id, course.course_code, section.section_number, sectionType);
-        showModal("เข้าคิวสำเร็จ", `คุณได้เข้าคิววิชา ${course.course_code} Sec ${section.section_number} เรียบร้อยแล้ว`, "success");
+        await joinWaitlistAPI(
+          student.student_id,
+          course.course_code,
+          section.section_number,
+          sectionType,
+        );
+        showModal(
+          "เข้าคิวสำเร็จ",
+          `คุณได้เข้าคิววิชา ${course.course_code} Sec ${section.section_number} เรียบร้อยแล้ว`,
+          "success",
+        );
       } catch (error) {
         showModal("ไม่สำเร็จ", error.message || "ไม่สามารถต่อคิวได้", "error");
       }
     });
-    
+
     setConfirmModalVisible(true);
   };
 
@@ -127,7 +145,7 @@ export default function ManualScreen({ student, setView }) {
       const [cartData, scheduleData, allCoursesData] = await Promise.all([
         getCartAPI(student.student_id).catch(() => []),
         getScheduleAPI(student.student_id).catch(() => []),
-        getAvailableCoursesAPI(student.student_id).catch(() => [])
+        getAvailableCoursesAPI(student.student_id).catch(() => []),
       ]);
 
       setCart(cartData);
@@ -138,16 +156,27 @@ export default function ManualScreen({ student, setView }) {
         if (c.suggested_semester != student.current_semester) return false;
 
         const courseGroup = c.course_group ? c.course_group.toLowerCase() : "";
-        const isFreeElective = courseGroup.includes("เลือกเสรี") || courseGroup.includes("free elective");
-        
+        const isFreeElective =
+          courseGroup.includes("เลือกเสรี") ||
+          courseGroup.includes("free elective");
+
         if (isFreeElective) {
-          const major = student.major || ""; 
+          const major = student.major || "";
           // 🌟 เช็กจากชื่อสาขาภาษาไทยตาม Log
-          if (major.includes("วิศวกรรมคอมพิวเตอร์") && c.course_code.startsWith("CPE")) return false;
-          if (major.includes("เทคโนโลยีสารสนเทศ") && c.course_code.startsWith("ICT")) return false;
-          if (major.includes("โลจิสติกส์") && c.course_code.startsWith("LSM")) return false;
+          if (
+            major.includes("วิศวกรรมคอมพิวเตอร์") &&
+            c.course_code.startsWith("CPE")
+          )
+            return false;
+          if (
+            major.includes("เทคโนโลยีสารสนเทศ") &&
+            c.course_code.startsWith("ICT")
+          )
+            return false;
+          if (major.includes("โลจิสติกส์") && c.course_code.startsWith("LSM"))
+            return false;
         }
-        return true; 
+        return true;
       });
 
       setCourses(filteredCourses);
@@ -187,23 +216,34 @@ export default function ManualScreen({ student, setView }) {
         );
 
         // 📌 กรองวิชาสาขาตัวเองออกจากหมวดวิชาเลือกเสรี Z
-        const major = student.major || ""; 
+        const major = student.major || "";
         const filteredOptions = options.filter((opt) => {
-          if (major.includes("วิศวกรรมคอมพิวเตอร์") && opt.course_code.startsWith("CPE")) return false;
-          if (major.includes("เทคโนโลยีสารสนเทศ") && opt.course_code.startsWith("ICT")) return false;
-          if (major.includes("โลจิสติกส์") && opt.course_code.startsWith("LSM")) return false;
+          if (
+            major.includes("วิศวกรรมคอมพิวเตอร์") &&
+            opt.course_code.startsWith("CPE")
+          )
+            return false;
+          if (
+            major.includes("เทคโนโลยีสารสนเทศ") &&
+            opt.course_code.startsWith("ICT")
+          )
+            return false;
+          if (major.includes("โลจิสติกส์") && opt.course_code.startsWith("LSM"))
+            return false;
           return true;
         });
 
         // กำจัดวิชาที่ซ้ำกัน (ป้องกัน Error children with the same key)
         const uniqueOptions = Array.from(
-          new Map(filteredOptions.map((opt) => [opt.course_code, opt])).values()
+          new Map(
+            filteredOptions.map((opt) => [opt.course_code, opt]),
+          ).values(),
         );
 
         // 🌟 เรียง Section ย่อยๆ ในแต่ละวิชา Z Option
-        const sortedZOptions = uniqueOptions.map(opt => ({
+        const sortedZOptions = uniqueOptions.map((opt) => ({
           ...opt,
-          sections: sortSectionsArray(opt.sections)
+          sections: sortSectionsArray(opt.sections),
         }));
 
         setZOptions(sortedZOptions);
@@ -236,8 +276,9 @@ export default function ManualScreen({ student, setView }) {
     if (section.enrolled_seats >= section.max_seats) {
       return showModal(
         "ที่นั่งเต็ม",
-        `Section ${section.section_number} (${sectionType}) เต็มแล้ว` + warningMsg,
-        "error"
+        `Section ${section.section_number} (${sectionType}) เต็มแล้ว` +
+          warningMsg,
+        "error",
       );
     }
 
@@ -252,8 +293,9 @@ export default function ManualScreen({ student, setView }) {
       const typeLabel = sectionType === "T" ? "ทฤษฎี (T)" : "ปฏิบัติ (L)";
       return showModal(
         "ไม่สามารถเพิ่มได้",
-        `คุณได้ลงทะเบียนวิชา ${targetCourse.course_code} ${typeLabel} ไปเรียบร้อยแล้วในตารางเรียน` + warningMsg,
-        "error"
+        `คุณได้ลงทะเบียนวิชา ${targetCourse.course_code} ${typeLabel} ไปเรียบร้อยแล้วในตารางเรียน` +
+          warningMsg,
+        "error",
       );
     }
 
@@ -266,8 +308,9 @@ export default function ManualScreen({ student, setView }) {
       const typeLabel = sectionType === "T" ? "ทฤษฎี (T)" : "ปฏิบัติ (L)";
       return showModal(
         "ไม่สามารถเพิ่มได้",
-        `วิชา ${targetCourse.course_code} ${typeLabel} มีอยู่ในตะกร้าของคุณแล้ว (Sec ${alreadyInCart.section_number})\nหากต้องการเปลี่ยนกลุ่ม กรุณาลบออกจากตะกร้าก่อน` + warningMsg,
-        "warning"
+        `วิชา ${targetCourse.course_code} ${typeLabel} มีอยู่ในตะกร้าของคุณแล้ว (Sec ${alreadyInCart.section_number})\nหากต้องการเปลี่ยนกลุ่ม กรุณาลบออกจากตะกร้าก่อน` +
+          warningMsg,
+        "warning",
       );
     }
 
@@ -285,8 +328,9 @@ export default function ManualScreen({ student, setView }) {
 
       return showModal(
         "เวลาเรียนชนกัน!",
-        `Sec ที่คุณเลือก มีเวลาทับซ้อนกับวิชา:\n${conflict.course_code} Sec ${conflict.section_number} ${typeLabel}\nซึ่งอยู่ใน "${location}" ของคุณแล้ว` + warningMsg,
-        "error"
+        `Sec ที่คุณเลือก มีเวลาทับซ้อนกับวิชา:\n${conflict.course_code} Sec ${conflict.section_number} ${typeLabel}\nซึ่งอยู่ใน "${location}" ของคุณแล้ว` +
+          warningMsg,
+        "error",
       );
     }
 
@@ -298,11 +342,12 @@ export default function ManualScreen({ student, setView }) {
         sectionType,
       );
       const typeLabel = sectionType === "T" ? "ทฤษฎี (T)" : "ปฏิบัติ (L)";
-      
+
       showModal(
         "สำเร็จ",
-        `เพิ่ม Sec ${section.section_number} ${typeLabel} ลงตะกร้าแล้ว` + warningMsg,
-        "success"
+        `เพิ่ม Sec ${section.section_number} ${typeLabel} ลงตะกร้าแล้ว` +
+          warningMsg,
+        "success",
       );
 
       // โหลดเฉพาะตะกร้ากับตารางเรียนใหม่พอ ไม่ต้องโหลดวิชาทั้งหมดใหม่
@@ -336,7 +381,9 @@ export default function ManualScreen({ student, setView }) {
       >
         <View style={styles.sectionInfo}>
           <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionNumText}>กลุ่ม: {sec.section_number}</Text>
+            <Text style={styles.sectionNumText}>
+              กลุ่ม: {sec.section_number}
+            </Text>
             <View
               style={[
                 styles.typeBadge,
@@ -368,12 +415,12 @@ export default function ManualScreen({ student, setView }) {
         <TouchableOpacity
           style={[
             styles.addBtn,
-            isFull 
+            isFull
               ? { backgroundColor: "#FF9800" } // สีส้มสำหรับปุ่มต่อคิว
               : { backgroundColor: isT ? "#D23669" : "#1a73e8" },
           ]}
-          onPress={() => 
-            isFull 
+          onPress={() =>
+            isFull
               ? handleJoinWaitlistPrompt(course, sec, displayType) // ถ้าเต็มให้เรียกป๊อปอัปต่อคิว
               : handleAddSection(course, sec, displayType)
           }
@@ -394,7 +441,6 @@ export default function ManualScreen({ student, setView }) {
       style={styles.container}
     >
       <SafeAreaView style={styles.safeArea}>
-
         {/* 🌟 Custom Modal ป็อปอัพสวยๆ แทรกตรงนี้ */}
         <Modal
           animationType="fade"
@@ -404,32 +450,59 @@ export default function ManualScreen({ student, setView }) {
         >
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
-              
-              <View style={[
-                styles.modalIconBg, 
-                { backgroundColor: modalConfig.type === 'success' ? '#E8F5E9' : modalConfig.type === 'warning' ? '#FFF3E0' : '#FFEBEE' }
-              ]}>
-                <Feather 
-                  name={modalConfig.type === 'success' ? "check-circle" : modalConfig.type === 'warning' ? "alert-triangle" : "x-circle"} 
-                  size={32} 
-                  color={modalConfig.type === 'success' ? "#4CAF50" : modalConfig.type === 'warning' ? "#FF9800" : "#E53935"} 
+              <View
+                style={[
+                  styles.modalIconBg,
+                  {
+                    backgroundColor:
+                      modalConfig.type === "success"
+                        ? "#E8F5E9"
+                        : modalConfig.type === "warning"
+                          ? "#FFF3E0"
+                          : "#FFEBEE",
+                  },
+                ]}
+              >
+                <Feather
+                  name={
+                    modalConfig.type === "success"
+                      ? "check-circle"
+                      : modalConfig.type === "warning"
+                        ? "alert-triangle"
+                        : "x-circle"
+                  }
+                  size={32}
+                  color={
+                    modalConfig.type === "success"
+                      ? "#4CAF50"
+                      : modalConfig.type === "warning"
+                        ? "#FF9800"
+                        : "#E53935"
+                  }
                 />
               </View>
-              
+
               <Text style={styles.modalTitle}>{modalConfig.title}</Text>
               <Text style={styles.modalMessage}>{modalConfig.message}</Text>
-              
+
               <View style={styles.modalButtonContainer}>
                 <TouchableOpacity
-                  style={[styles.modalButton, { 
-                    backgroundColor: modalConfig.type === 'success' ? '#4CAF50' : modalConfig.type === 'warning' ? '#FF9800' : '#E53935'
-                  }]}
+                  style={[
+                    styles.modalButton,
+                    {
+                      backgroundColor:
+                        modalConfig.type === "success"
+                          ? "#4CAF50"
+                          : modalConfig.type === "warning"
+                            ? "#FF9800"
+                            : "#E53935",
+                    },
+                  ]}
                   onPress={() => setModalVisible(false)}
                 >
                   <Text style={styles.confirmButtonText}>ตกลง</Text>
                 </TouchableOpacity>
               </View>
-              
             </View>
           </View>
         </Modal>
@@ -443,21 +516,33 @@ export default function ManualScreen({ student, setView }) {
         >
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
-              <View style={[styles.modalIconBg, { backgroundColor: '#FFF3E0' }]}>
+              <View
+                style={[styles.modalIconBg, { backgroundColor: "#FFF3E0" }]}
+              >
                 <Feather name="clock" size={32} color="#FF9800" />
               </View>
               <Text style={styles.modalTitle}>{confirmDetail.title}</Text>
               <Text style={styles.modalMessage}>{confirmDetail.message}</Text>
-              
+
               <View style={[styles.modalButtonContainer, { gap: 10 }]}>
                 <TouchableOpacity
-                  style={[styles.modalButton, { backgroundColor: '#E0E0E0', flex: 1 }]}
+                  style={[
+                    styles.modalButton,
+                    { backgroundColor: "#E0E0E0", flex: 1 },
+                  ]}
                   onPress={() => setConfirmModalVisible(false)}
                 >
-                  <Text style={[styles.confirmButtonText, { color: '#514345' }]}>ยกเลิก</Text>
+                  <Text
+                    style={[styles.confirmButtonText, { color: "#514345" }]}
+                  >
+                    ยกเลิก
+                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.modalButton, { backgroundColor: '#FF9800', flex: 1 }]}
+                  style={[
+                    styles.modalButton,
+                    { backgroundColor: "#FF9800", flex: 1 },
+                  ]}
                   onPress={confirmAction}
                 >
                   <Text style={styles.confirmButtonText}>ยืนยันต่อคิว</Text>

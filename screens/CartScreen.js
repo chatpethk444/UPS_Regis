@@ -19,7 +19,7 @@ import {
   confirmEnrollmentAPI,
   getScheduleAPI,
   getCourseSectionsAPI, // ดึงข้อมูลทุก section ของรายวิชานั้น
-  addToCartAPI,         // เพิ่มวิชาเข้าตะกร้า
+  addToCartAPI, // เพิ่มวิชาเข้าตะกร้า
 } from "../api";
 
 const { width } = Dimensions.get("window");
@@ -68,7 +68,8 @@ export default function CartScreen({ student, setView }) {
   const [scheduleData, setScheduleData] = useState([]);
   const [selectedToRemove, setSelectedToRemove] = useState([]);
   // 🌟 State แบบใหม่: รองรับการปรับเปลี่ยนหลายวิชาพร้อมกัน
-  const [changeSectionModalVisible, setChangeSectionModalVisible] = useState(false);
+  const [changeSectionModalVisible, setChangeSectionModalVisible] =
+    useState(false);
   const [isMinimized, setIsMinimized] = useState(false); // 🌟 State สำหรับย่อ-ขยาย
   const [adjustments, setAdjustments] = useState([]); // [{ target, alternatives, selectedNewSection }]
   const [isSuppressed, setIsSuppressed] = useState(false); // 🌟 เพิ่ม flag เพื่อระงับ Pop-up ชั่วคราว
@@ -133,11 +134,12 @@ export default function CartScreen({ student, setView }) {
   // 🌟 ฟังก์ชันใหม่: เช็ควิชาเต็มและเสนอทางเลือกทันที (ใช้ตอนโหลดหน้า หรือตอนกดยืนยัน)
   const checkFullItemsAndSuggest = async (currentItems = null) => {
     // 🌟 ถ้ากำลังระงับ (เพิ่งเปลี่ยนเสร็จ) หรือ Modal เปิดอยู่แล้ว ให้ข้ามไปเลย
-    if (isSuppressed || (changeSectionModalVisible && !isMinimized)) return false;
+    if (isSuppressed || (changeSectionModalVisible && !isMinimized))
+      return false;
 
     try {
       setLoadingCart(true); // 🌟 โชว์ Loading เพื่อให้ผู้ใช้รู้ว่ากำลังเช็คข้อมูลล่าสุด
-      
+
       // ถ้าไม่ได้ส่งข้อมูลมา ให้ Fetch ใหม่จากเซิร์ฟเวอร์โดยตรง เพื่อความชัวร์ 100%
       let itemsToCheck = currentItems;
       if (!itemsToCheck) {
@@ -157,37 +159,49 @@ export default function CartScreen({ student, setView }) {
       );
 
       if (fullItems.length > 0) {
-        const uniqueCourseCodes = [...new Set(fullItems.map(it => it.course_code || it.course_id))];
-        
+        const uniqueCourseCodes = [
+          ...new Set(fullItems.map((it) => it.course_code || it.course_id)),
+        ];
+
         const responses = await Promise.all(
-          uniqueCourseCodes.map(code => getCourseSectionsAPI(code).catch(() => []))
+          uniqueCourseCodes.map((code) =>
+            getCourseSectionsAPI(code).catch(() => []),
+          ),
         );
-        
+
         const sectionsMap = {};
         uniqueCourseCodes.forEach((code, idx) => {
           sectionsMap[code] = responses[idx];
         });
 
-        const newAdjustments = fullItems.map(target => {
+        const newAdjustments = fullItems.map((target) => {
           const courseCode = target.course_code || target.course_id;
           const allSections = sectionsMap[courseCode] || [];
-          
+
           const openSections = allSections.filter(
             (sec) =>
               (sec.max_seats || 0) > 0 &&
               (sec.enrolled_seats || 0) < (sec.max_seats || 0) &&
-              (sec.section_number !== target.section_number || sec.section_type !== target.section_type) &&
-              sec.section_type === target.section_type
+              (sec.section_number !== target.section_number ||
+                sec.section_type !== target.section_type) &&
+              sec.section_type === target.section_type,
           );
 
           // 🌟 เลือกตัวแรกให้อัตโนมัติ
-          const firstAvailable = openSections.length > 0 ? openSections[0] : null;
+          const firstAvailable =
+            openSections.length > 0 ? openSections[0] : null;
 
-          return { target, alternatives: openSections, selectedNewSection: firstAvailable };
+          return {
+            target,
+            alternatives: openSections,
+            selectedNewSection: firstAvailable,
+          };
         });
 
         setLoadingCart(false); // 🌟 ปิด Loading หลัก เมื่อเตรียมข้อมูลเสร็จ
-        const hasAlternatives = newAdjustments.some(adj => adj.alternatives.length > 0);
+        const hasAlternatives = newAdjustments.some(
+          (adj) => adj.alternatives.length > 0,
+        );
 
         if (hasAlternatives) {
           setAdjustments(newAdjustments);
@@ -198,7 +212,7 @@ export default function CartScreen({ student, setView }) {
           return false;
         }
       }
-      
+
       setLoadingCart(false);
       return false;
     } catch (e) {
@@ -494,11 +508,12 @@ export default function CartScreen({ student, setView }) {
     );
   };
 
-  
   // 🌟 ฟังก์ชันสลับ Section ในตะกร้า (แบบใหม่ รองรับหลายวิชา)
   const handleApplyNewSection = async () => {
     // กรองเอาเฉพาะรายการที่ผู้ใช้เลือกเปลี่ยนจริง
-    const itemsToChange = adjustments.filter(adj => adj.selectedNewSection !== null);
+    const itemsToChange = adjustments.filter(
+      (adj) => adj.selectedNewSection !== null,
+    );
     if (itemsToChange.length === 0) {
       setChangeSectionModalVisible(false);
       return;
@@ -515,21 +530,35 @@ export default function CartScreen({ student, setView }) {
         const courseCode = target.course_code || target.course_id;
 
         // ลบวิชา (Section เก่าที่เต็ม)
-        await removeFromCartAPI(student.student_id, courseCode, target.section_type);
-        
+        await removeFromCartAPI(
+          student.student_id,
+          courseCode,
+          target.section_type,
+        );
+
         // Add วิชา (Section ใหม่ที่เลือก)
-        await addToCartAPI(student.student_id, courseCode, selected.section_number, selected.section_type);
+        await addToCartAPI(
+          student.student_id,
+          courseCode,
+          selected.section_number,
+          selected.section_type,
+        );
       }
 
       await fetchCart(false); // โหลดตะกร้าใหม่
       setLoadingCart(false);
 
-      showCustomAlert("success", "เปลี่ยน Section สำเร็จ", `อัปเดตวิชาที่เลือกให้เรียบร้อยแล้ว`, () => {
-        // 🌟 หลังจากกดตกลง ให้รออีก 5 วินาที แล้วค่อยเปิดการเช็คใหม่อีกรอบ
-        setTimeout(() => {
-          setIsSuppressed(false);
-        }, 5000);
-      });
+      showCustomAlert(
+        "success",
+        "เปลี่ยน Section สำเร็จ",
+        `อัปเดตวิชาที่เลือกให้เรียบร้อยแล้ว`,
+        () => {
+          // 🌟 หลังจากกดตกลง ให้รออีก 5 วินาที แล้วค่อยเปิดการเช็คใหม่อีกรอบ
+          setTimeout(() => {
+            setIsSuppressed(false);
+          }, 5000);
+        },
+      );
     } catch (error) {
       console.log("สาเหตุที่ API พัง:", error);
       setLoadingCart(false);
@@ -589,13 +618,35 @@ export default function CartScreen({ student, setView }) {
   // 🌟 ฟังก์ชันจัดเรียงลำดับวิชาตามวันและเวลา 🌟
   const getSortedItems = (data) => {
     const DAY_PRIORITY = {
-      "Monday": 1, "Mon": 1, "จันทร์": 1, "จ": 1,
-      "Tuesday": 2, "Tue": 2, "อังคาร": 2, "อ": 2,
-      "Wednesday": 3, "Wed": 3, "พุธ": 3, "พ": 3,
-      "Thursday": 4, "Thu": 4, "พฤหัสบดี": 4, "พฤหัส": 4, "พฤ": 4,
-      "Friday": 5, "Fri": 5, "ศุกร์": 5, "ศ": 5,
-      "Saturday": 6, "Sat": 6, "เสาร์": 6, "ส": 6,
-      "Sunday": 7, "Sun": 7, "อาทิตย์": 7, "อา": 7
+      Monday: 1,
+      Mon: 1,
+      จันทร์: 1,
+      จ: 1,
+      Tuesday: 2,
+      Tue: 2,
+      อังคาร: 2,
+      อ: 2,
+      Wednesday: 3,
+      Wed: 3,
+      พุธ: 3,
+      พ: 3,
+      Thursday: 4,
+      Thu: 4,
+      พฤหัสบดี: 4,
+      พฤหัส: 4,
+      พฤ: 4,
+      Friday: 5,
+      Fri: 5,
+      ศุกร์: 5,
+      ศ: 5,
+      Saturday: 6,
+      Sat: 6,
+      เสาร์: 6,
+      ส: 6,
+      Sunday: 7,
+      Sun: 7,
+      อาทิตย์: 7,
+      อา: 7,
     };
 
     return [...data].sort((a, b) => {
@@ -1058,53 +1109,74 @@ export default function CartScreen({ student, setView }) {
 
         {/* 🌟 หน้าต่างเสนอ Section ใหม่ (แบบย่อ-ขยายได้) 🌟 */}
         {changeSectionModalVisible && (
-          <View 
+          <View
             style={[
               styles.floatingModalContainer,
-              isMinimized ? styles.minimizedFloatingModal : styles.maximizedFloatingModal
+              isMinimized
+                ? styles.minimizedFloatingModal
+                : styles.maximizedFloatingModal,
             ]}
           >
             {/* Header ของหน้าต่างเสนอแนะ */}
-            <TouchableOpacity 
+            <TouchableOpacity
               activeOpacity={0.9}
               onPress={() => isMinimized && setIsMinimized(false)}
               style={[
-                styles.sectionModalHeader, 
-                isMinimized && { borderBottomWidth: 0, marginBottom: 0, paddingBottom: 0 }
+                styles.sectionModalHeader,
+                isMinimized && {
+                  borderBottomWidth: 0,
+                  marginBottom: 0,
+                  paddingBottom: 0,
+                },
               ]}
             >
               <View style={{ flex: 1 }}>
                 <View style={{ flexDirection: "row", alignItems: "center" }}>
-                  <Text style={{ fontSize: isMinimized ? 14 : 18, fontWeight: "bold", color: "#D32F2F" }}>
-                    {isMinimized ? "💡 มีข้อเสนอแนะกลุ่มเรียนใหม่" : "🚨 ที่นั่งเต็ม!"}
+                  <Text
+                    style={{
+                      fontSize: isMinimized ? 14 : 18,
+                      fontWeight: "bold",
+                      color: "#D32F2F",
+                    }}
+                  >
+                    {isMinimized
+                      ? "💡 มีข้อเสนอแนะกลุ่มเรียนใหม่"
+                      : "🚨 ที่นั่งเต็ม!"}
                   </Text>
                   {isMinimized && (
-                    <Text style={{ fontSize: 12, color: "#837375", marginLeft: 10 }}>
+                    <Text
+                      style={{ fontSize: 12, color: "#837375", marginLeft: 10 }}
+                    >
                       (แตะเพื่อดูรายละเอียด)
                     </Text>
                   )}
                 </View>
                 {!isMinimized && (
-                  <Text style={{ fontSize: 14, color: "#514345", marginTop: 4 }}>
-                    พบวิชาในตะกร้าที่ที่นั่งเต็มแล้ว ระบบเลือกกลุ่มใหม่ที่ว่างให้เบื้องต้น
+                  <Text
+                    style={{ fontSize: 14, color: "#514345", marginTop: 4 }}
+                  >
+                    พบวิชาในตะกร้าที่ที่นั่งเต็มแล้ว
+                    ระบบเลือกกลุ่มใหม่ที่ว่างให้เบื้องต้น
                   </Text>
                 )}
               </View>
-              
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+              >
                 {/* ปุ่มย่อ-ขยาย */}
-                <TouchableOpacity 
+                <TouchableOpacity
                   onPress={() => setIsMinimized(!isMinimized)}
                   style={styles.headerIconBtn}
                 >
-                  <MaterialIcons 
-                    name={isMinimized ? "expand-less" : "expand-more"} 
-                    size={28} 
-                    color="#837375" 
+                  <MaterialIcons
+                    name={isMinimized ? "expand-less" : "expand-more"}
+                    size={28}
+                    color="#837375"
                   />
                 </TouchableOpacity>
                 {/* ปุ่มปิด */}
-                <TouchableOpacity 
+                <TouchableOpacity
                   onPress={() => setChangeSectionModalVisible(false)}
                   style={styles.headerIconBtn}
                 >
@@ -1115,56 +1187,136 @@ export default function CartScreen({ student, setView }) {
 
             {!isMinimized && (
               <>
-                <ScrollView style={{ maxHeight: 350 }} showsVerticalScrollIndicator={false}>
+                <ScrollView
+                  style={{ maxHeight: 350 }}
+                  showsVerticalScrollIndicator={false}
+                >
                   {adjustments.map((adj, adjIdx) => {
                     const target = adj.target;
-                    const typeLabel = target.section_type === "T" ? "ทฤษฎี" : "ปฏิบัติ";
-                    
+                    const typeLabel =
+                      target.section_type === "T" ? "ทฤษฎี" : "ปฏิบัติ";
+
                     return (
-                      <View key={adjIdx} style={{ marginBottom: 20, borderBottomWidth: adjIdx < adjustments.length - 1 ? 1 : 0, borderBottomColor: "#eee", paddingBottom: 16 }}>
-                        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                          <Text style={{ fontSize: 15, fontWeight: "bold", color: "#a73355" }}>
-                            {target.course_code || target.course_id} - {typeLabel}
+                      <View
+                        key={adjIdx}
+                        style={{
+                          marginBottom: 20,
+                          borderBottomWidth:
+                            adjIdx < adjustments.length - 1 ? 1 : 0,
+                          borderBottomColor: "#eee",
+                          paddingBottom: 16,
+                        }}
+                      >
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            marginBottom: 8,
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 15,
+                              fontWeight: "bold",
+                              color: "#a73355",
+                            }}
+                          >
+                            {target.course_code || target.course_id} -{" "}
+                            {typeLabel}
                           </Text>
-                          <View style={{ backgroundColor: "#ffebee", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 }}>
+                          <View
+                            style={{
+                              backgroundColor: "#ffebee",
+                              paddingHorizontal: 8,
+                              paddingVertical: 2,
+                              borderRadius: 4,
+                            }}
+                          >
                             <Text style={{ fontSize: 10, color: "#d32f2f" }}>
-                              เดิม: Sec {target.section_number} ({DAY_MAP[target.day_of_week] || target.day_of_week})
+                              เดิม: Sec {target.section_number} (
+                              {DAY_MAP[target.day_of_week] ||
+                                target.day_of_week}
+                              )
                             </Text>
                           </View>
                         </View>
 
                         {adj.alternatives.length > 0 ? (
                           <View>
-                            <Text style={{ fontSize: 12, color: "#837375", marginBottom: 8 }}>เลือกกลุ่มเรียนใหม่ที่ยังว่าง:</Text>
+                            <Text
+                              style={{
+                                fontSize: 12,
+                                color: "#837375",
+                                marginBottom: 8,
+                              }}
+                            >
+                              เลือกกลุ่มเรียนใหม่ที่ยังว่าง:
+                            </Text>
                             {adj.alternatives.map((sec, secIdx) => {
-                              const isSelected = adj.selectedNewSection?.section_number === sec.section_number;
+                              const isSelected =
+                                adj.selectedNewSection?.section_number ===
+                                sec.section_number;
                               return (
                                 <TouchableOpacity
                                   key={secIdx}
                                   style={[
-                                    styles.sectionOptionCard, 
+                                    styles.sectionOptionCard,
                                     { paddingVertical: 10, marginBottom: 6 },
-                                    isSelected && { borderColor: "#a73355", backgroundColor: "#fff5f7" }
+                                    isSelected && {
+                                      borderColor: "#a73355",
+                                      backgroundColor: "#fff5f7",
+                                    },
                                   ]}
-                                  onPress={() => updateAdjustmentSelection(adjIdx, sec)}
+                                  onPress={() =>
+                                    updateAdjustmentSelection(adjIdx, sec)
+                                  }
                                 >
-                                  <MaterialIcons 
-                                    name={isSelected ? "radio-button-checked" : "radio-button-unchecked"} 
-                                    size={20} 
-                                    color={isSelected ? "#a73355" : "#ccc"} 
+                                  <MaterialIcons
+                                    name={
+                                      isSelected
+                                        ? "radio-button-checked"
+                                        : "radio-button-unchecked"
+                                    }
+                                    size={20}
+                                    color={isSelected ? "#a73355" : "#ccc"}
                                   />
                                   <View style={{ marginLeft: 10, flex: 1 }}>
-                                    <Text style={{ fontSize: 14, fontWeight: "bold", color: "#1f1a1c" }}>
-                                      Sec {sec.section_number} ({sec.section_type})
+                                    <Text
+                                      style={{
+                                        fontSize: 14,
+                                        fontWeight: "bold",
+                                        color: "#1f1a1c",
+                                      }}
+                                    >
+                                      Sec {sec.section_number} (
+                                      {sec.section_type})
                                     </Text>
-                                    <Text style={{ fontSize: 11, color: "#837375" }}>
-                                      วัน{DAY_MAP[sec.day_of_week] || sec.day_of_week} {String(sec.start_time).substring(0,5)}-{String(sec.end_time).substring(0,5)} น.
+                                    <Text
+                                      style={{ fontSize: 11, color: "#837375" }}
+                                    >
+                                      วัน
+                                      {DAY_MAP[sec.day_of_week] ||
+                                        sec.day_of_week}{" "}
+                                      {String(sec.start_time).substring(0, 5)}-
+                                      {String(sec.end_time).substring(0, 5)} น.
                                     </Text>
                                   </View>
                                   <View style={{ alignItems: "flex-end" }}>
-                                    <Text style={{ fontSize: 11, color: "#837375" }}>{sec.enrolled_seats}/{sec.max_seats}</Text>
-                                    <Text style={{ fontSize: 10, color: "#2E7D32", fontWeight: "bold" }}>
-                                      ว่าง {sec.max_seats - sec.enrolled_seats} ที่นั่ง
+                                    <Text
+                                      style={{ fontSize: 11, color: "#837375" }}
+                                    >
+                                      {sec.enrolled_seats}/{sec.max_seats}
+                                    </Text>
+                                    <Text
+                                      style={{
+                                        fontSize: 10,
+                                        color: "#2E7D32",
+                                        fontWeight: "bold",
+                                      }}
+                                    >
+                                      ว่าง {sec.max_seats - sec.enrolled_seats}{" "}
+                                      ที่นั่ง
                                     </Text>
                                   </View>
                                 </TouchableOpacity>
@@ -1172,9 +1324,32 @@ export default function CartScreen({ student, setView }) {
                             })}
                           </View>
                         ) : (
-                          <View style={{ padding: 12, backgroundColor: "#f5f5f5", borderRadius: 8, alignItems: "center" }}>
-                            <Text style={{ fontSize: 13, color: "#d32f2f", fontWeight: "bold" }}>❌ ไม่มีกลุ่มอื่นว่างแล้ว</Text>
-                            <Text style={{ fontSize: 12, color: "#837375", marginTop: 2 }}>กรุณาลบวิชานี้ออกจากตะกร้า</Text>
+                          <View
+                            style={{
+                              padding: 12,
+                              backgroundColor: "#f5f5f5",
+                              borderRadius: 8,
+                              alignItems: "center",
+                            }}
+                          >
+                            <Text
+                              style={{
+                                fontSize: 13,
+                                color: "#d32f2f",
+                                fontWeight: "bold",
+                              }}
+                            >
+                              ❌ ไม่มีกลุ่มอื่นว่างแล้ว
+                            </Text>
+                            <Text
+                              style={{
+                                fontSize: 12,
+                                color: "#837375",
+                                marginTop: 2,
+                              }}
+                            >
+                              กรุณาลบวิชานี้ออกจากตะกร้า
+                            </Text>
                           </View>
                         )}
                       </View>
@@ -1183,22 +1358,45 @@ export default function CartScreen({ student, setView }) {
                 </ScrollView>
 
                 <View style={{ flexDirection: "row", marginTop: 15, gap: 12 }}>
-                  <TouchableOpacity 
-                    style={{ flex: 1, backgroundColor: "#f5ebed", paddingVertical: 14, borderRadius: 12, alignItems: "center" }}
+                  <TouchableOpacity
+                    style={{
+                      flex: 1,
+                      backgroundColor: "#f5ebed",
+                      paddingVertical: 14,
+                      borderRadius: 12,
+                      alignItems: "center",
+                    }}
                     onPress={() => setChangeSectionModalVisible(false)}
                   >
-                    <Text style={{ color: "#837375", fontWeight: "bold" }}>ไว้ก่อน</Text>
+                    <Text style={{ color: "#837375", fontWeight: "bold" }}>
+                      ไว้ก่อน
+                    </Text>
                   </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={{ 
-                      flex: 1, 
-                      opacity: adjustments.some(a => a.selectedNewSection !== null) ? 1 : 0.5 
+                  <TouchableOpacity
+                    style={{
+                      flex: 1,
+                      opacity: adjustments.some(
+                        (a) => a.selectedNewSection !== null,
+                      )
+                        ? 1
+                        : 0.5,
                     }}
-                    disabled={!adjustments.some(a => a.selectedNewSection !== null)}
+                    disabled={
+                      !adjustments.some((a) => a.selectedNewSection !== null)
+                    }
                     onPress={handleApplyNewSection}
                   >
-                    <LinearGradient colors={["#a73355", "#7b5455"]} style={{ paddingVertical: 14, borderRadius: 12, alignItems: "center" }}>
-                      <Text style={{ color: "#fff", fontWeight: "bold" }}>ยืนยันการเปลี่ยน</Text>
+                    <LinearGradient
+                      colors={["#a73355", "#7b5455"]}
+                      style={{
+                        paddingVertical: 14,
+                        borderRadius: 12,
+                        alignItems: "center",
+                      }}
+                    >
+                      <Text style={{ color: "#fff", fontWeight: "bold" }}>
+                        ยืนยันการเปลี่ยน
+                      </Text>
                     </LinearGradient>
                   </TouchableOpacity>
                 </View>
@@ -1209,23 +1407,37 @@ export default function CartScreen({ student, setView }) {
 
         {/* 🌟 Loading Overlay สำหรับป้องกันการกดทับขณะประมวลผล 🌟 */}
         {loadingCart && (
-          <View 
-            style={{ 
-              position: "absolute", 
-              top: 0, left: 0, right: 0, bottom: 0, 
-              backgroundColor: "rgba(255,255,255,0.7)", 
-              justifyContent: "center", 
-              alignItems: "center", 
-              zIndex: 9999 
+          <View
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "rgba(255,255,255,0.7)",
+              justifyContent: "center",
+              alignItems: "center",
+              zIndex: 9999,
             }}
           >
-            <View style={{ backgroundColor: "white", padding: 30, borderRadius: 20, elevation: 10, alignItems: "center" }}>
+            <View
+              style={{
+                backgroundColor: "white",
+                padding: 30,
+                borderRadius: 20,
+                elevation: 10,
+                alignItems: "center",
+              }}
+            >
               <ActivityIndicator size="large" color="#a73355" />
-              <Text style={{ marginTop: 15, fontWeight: "bold", color: "#7b5455" }}>กำลังอัปเดตข้อมูล...</Text>
+              <Text
+                style={{ marginTop: 15, fontWeight: "bold", color: "#7b5455" }}
+              >
+                กำลังอัปเดตข้อมูล...
+              </Text>
             </View>
           </View>
         )}
-        
       </SafeAreaView>
     </LinearGradient>
   );
@@ -1478,29 +1690,57 @@ const styles = StyleSheet.create({
     backgroundColor: "#f5f5f5",
     borderRadius: 8,
   },
-  sectionModalHeader: { 
-    flexDirection: "row", 
-    justifyContent: "space-between", 
-    alignItems: "center", 
-    borderBottomWidth: 1, 
-    borderBottomColor: "#f0f0f0", 
-    paddingBottom: 12, 
-    marginBottom: 12 
+  sectionModalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    borderBottomWidth: 1,
+    borderBottomColor: "#f0f0f0",
+    paddingBottom: 12,
+    marginBottom: 12,
   },
-  sectionOptionCard: { 
-    flexDirection: "row", 
-    alignItems: "center", 
-    backgroundColor: "#fafafa", 
-    borderWidth: 1, 
-    borderColor: "#f0f0f0", 
-    padding: 16, 
-    borderRadius: 12, 
-    marginBottom: 8 
+  sectionOptionCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fafafa",
+    borderWidth: 1,
+    borderColor: "#f0f0f0",
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 8,
   },
 
-  bottomNav: { position: "absolute", bottom: 20, left: 16, right: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: "#ffffff", borderRadius: 40, paddingHorizontal: 8, paddingVertical: 8, elevation: 10, shadowColor: "#a73355", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.1, shadowRadius: 20 },
+  bottomNav: {
+    position: "absolute",
+    bottom: 20,
+    left: 16,
+    right: 16,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "#ffffff",
+    borderRadius: 40,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    elevation: 10,
+    shadowColor: "#a73355",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.1,
+    shadowRadius: 20,
+  },
   navItem: { alignItems: "center", paddingHorizontal: 8 },
   navText: { fontSize: 9, fontWeight: "bold", color: "#837375", marginTop: 4 },
-  navItemActive: { alignItems: "center", backgroundColor: "#f5ebed", paddingHorizontal: 16, paddingVertical: 10, borderRadius: 24 },
-  navTextActive: { fontSize: 9, fontWeight: "bold", color: "#a73355", marginTop: 4 },
+  navItemActive: {
+    alignItems: "center",
+    backgroundColor: "#f5ebed",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 24,
+  },
+  navTextActive: {
+    fontSize: 9,
+    fontWeight: "bold",
+    color: "#a73355",
+    marginTop: 4,
+  },
 });

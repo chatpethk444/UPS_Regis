@@ -28,7 +28,10 @@ export default function MenuScreen({ student, setView, onBatch, onLogout }) {
         {/* Top AppBar */}
         <View style={styles.header}>
           <View style={styles.headerLeft}>
-            <MaterialIcons name="menu-book" size={24} color="#514345" />
+             <Image 
+                          source={require("../assets/icon_UPS_BW.png")}
+                          style={{ width: 30, height: 30 }}
+                        />
             <Text style={styles.headerTitle}>UPS Regis</Text>
           </View>
           <TouchableOpacity style={styles.bellButton}>
@@ -94,20 +97,40 @@ export default function MenuScreen({ student, setView, onBatch, onLogout }) {
           </View>
 
           {/* 🌟 การ์ดใหม่: ลำดับรอคิว (Waitlist) 🌟 */}
-          <View style={[styles.mainCard, { backgroundColor: "#fff5f7", borderColor: "#ffd6dd", borderWidth: 1, marginTop: 16 }]}>
+          <View
+            style={[
+              styles.mainCard,
+              {
+                backgroundColor: "#fff5f7",
+                borderColor: "#ffd6dd",
+                borderWidth: 1,
+                marginTop: 16,
+              },
+            ]}
+          >
             <View style={styles.cardHeader}>
-              <View style={[styles.iconBoxMain, { backgroundColor: "#ffebee" }]}>
-                <MaterialIcons name="hourglass-bottom" size={22} color="#D32F2F" />
+              <View
+                style={[styles.iconBoxMain, { backgroundColor: "#ffebee" }]}
+              >
+                <MaterialIcons
+                  name="hourglass-bottom"
+                  size={22}
+                  color="#D32F2F"
+                />
               </View>
               <View style={[styles.badge, { backgroundColor: "#ffebee" }]}>
-                <Text style={[styles.badgeText, { color: "#D32F2F" }]}>WAITLIST</Text>
+                <Text style={[styles.badgeText, { color: "#D32F2F" }]}>
+                  WAITLIST
+                </Text>
               </View>
             </View>
             <Text style={styles.cardTitle}>ลำดับรอคิว (Waitlist)</Text>
-            <Text style={styles.cardDesc}>ตรวจสอบสถานะและยืนยันสิทธิ์การลงทะเบียนเมื่อว่าง</Text>
+            <Text style={styles.cardDesc}>
+              ตรวจสอบสถานะและยืนยันสิทธิ์การลงทะเบียนเมื่อว่าง
+            </Text>
 
             <TouchableOpacity
-              style={[styles.actionBtn, { backgroundColor: "#D32F2F" }]}
+              style={[styles.actionBtn, { backgroundColor: "#D23669" }]}
               onPress={() => setView("WAITLIST")}
             >
               <Text style={styles.btnText}>ดูรายการรอคิว</Text>
@@ -152,13 +175,7 @@ export default function MenuScreen({ student, setView, onBatch, onLogout }) {
                 <MaterialIcons name="chevron-right" size={16} color="#D23669" />
               </TouchableOpacity>
             </View>
-
-           
-            
-
           </View>
-
-          
         </ScrollView>
 
         {/* Floating Bottom Navigation Bar */}

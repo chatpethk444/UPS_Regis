@@ -1,9 +1,7 @@
 // components/shared.js — Component และ Style ที่ใช้ร่วมกันทุก Screen
 
 import React from "react";
-import {
-  View, Text, TouchableOpacity, StyleSheet,
-} from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { Feather } from "@expo/vector-icons";
 
 // ✅ ScreenHeader ใช้ซ้ำได้ทุกหน้า
@@ -42,17 +40,17 @@ export function CourseBadge({ code }) {
 }
 
 export const COLORS = {
-  primary:   "#1976D2",
-  success:   "#28A745",
-  danger:    "#E74C3C",
-  warning:   "#FF9800",
-  ai:        "#00BCD4",
-  purple:    "#9B59B6",
-  bg:        "#F5F7FA",
-  card:      "#FFFFFF",
-  border:    "#E0E0E0",
-  textMain:  "#1A1A1A",
-  textSub:   "#666666",
+  primary: "#1976D2",
+  success: "#28A745",
+  danger: "#E74C3C",
+  warning: "#FF9800",
+  ai: "#00BCD4",
+  purple: "#9B59B6",
+  bg: "#F5F7FA",
+  card: "#FFFFFF",
+  border: "#E0E0E0",
+  textMain: "#1A1A1A",
+  textSub: "#666666",
 };
 
 export const sharedStyles = StyleSheet.create({
@@ -135,7 +133,12 @@ export const sharedStyles = StyleSheet.create({
     borderLeftWidth: 4,
   },
   menuIcon: { fontSize: 30, marginBottom: 8 },
-  menuTitle: { fontSize: 14, fontWeight: "bold", color: COLORS.textMain, textAlign: "center" },
+  menuTitle: {
+    fontSize: 14,
+    fontWeight: "bold",
+    color: COLORS.textMain,
+    textAlign: "center",
+  },
   // Badge
   badge: {
     backgroundColor: "#EEEEEE",
@@ -193,7 +196,6 @@ export const sharedStyles = StyleSheet.create({
   smallText: { fontSize: 12, color: COLORS.textSub },
 });
 
-
 export const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -201,21 +203,21 @@ export const styles = StyleSheet.create({
   innerContainer: {
     flex: 1,
     paddingHorizontal: 32,
-    justifyContent: 'center',
+    justifyContent: "center",
   },
   headerWrapper: {
-    alignItems: 'center',
+    alignItems: "center",
     marginBottom: 40,
   },
   logoBox: {
     width: 80,
     height: 80,
-    backgroundColor: '#a73355',
+    backgroundColor: "#a73355",
     borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     marginBottom: 16,
-    shadowColor: '#a73355',
+    shadowColor: "#a73355",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.4,
     shadowRadius: 16,
@@ -223,85 +225,85 @@ export const styles = StyleSheet.create({
   },
   appName: {
     fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1f1a1c',
+    fontWeight: "bold",
+    color: "#1f1a1c",
     marginBottom: 4,
   },
   appSubName: {
     fontSize: 12,
-    color: '#a73355',
+    color: "#a73355",
     letterSpacing: 1,
-    textTransform: 'uppercase',
+    textTransform: "uppercase",
   },
   loginTitleWrapper: {
     marginBottom: 32,
   },
   loginTitle: {
     fontSize: 28,
-    fontWeight: 'bold',
-    color: '#1f1a1c',
+    fontWeight: "bold",
+    color: "#1f1a1c",
     marginBottom: 8,
   },
   titleDivider: {
     width: 40,
     height: 4,
-    backgroundColor: '#a73355',
+    backgroundColor: "#a73355",
     borderRadius: 2,
   },
   formContainer: {
-    width: '100%',
+    width: "100%",
   },
   inputGroup: {
     marginBottom: 16,
   },
   label: {
     fontSize: 12,
-    fontWeight: 'bold',
-    color: '#514345',
+    fontWeight: "bold",
+    color: "#514345",
     marginBottom: 8,
     marginLeft: 4,
   },
   inputWrapper: {
-    position: 'relative',
-    justifyContent: 'center',
+    position: "relative",
+    justifyContent: "center",
   },
   inputIconLeft: {
-    position: 'absolute',
+    position: "absolute",
     left: 16,
     zIndex: 1,
   },
   inputIconRight: {
-    position: 'absolute',
+    position: "absolute",
     right: 16,
     zIndex: 1,
     padding: 5,
   },
   input: {
-    width: '100%',
+    width: "100%",
     height: 56,
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    backgroundColor: "rgba(255, 255, 255, 0.8)",
     borderRadius: 16,
     paddingLeft: 48,
     paddingRight: 48,
-    color: '#1f1a1c',
+    color: "#1f1a1c",
   },
   forgotPassword: {
-    alignSelf: 'flex-end',
+    alignSelf: "flex-end",
     marginBottom: 24,
   },
   forgotPasswordText: {
     fontSize: 12,
-    fontWeight: '600',
-    color: '#a73355',
+    fontWeight: "600",
+    color: "#a73355",
   },
   loginButton: {
-    width: '100%',
+    width: "100%",
     height: 60,
-    backgroundColor: '#a73355',
+    backgroundColor: "#a73355",
     borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#a73355',
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: "#a73355",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.4,
     shadowRadius: 16,
@@ -309,7 +311,7 @@ export const styles = StyleSheet.create({
   },
   loginButtonText: {
     fontSize: 18,
-    fontWeight: 'bold',
-    color: '#ffffff',
+    fontWeight: "bold",
+    color: "#ffffff",
   },
 });

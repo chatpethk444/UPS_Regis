@@ -1,7 +1,7 @@
 // api.js — จุดเดียวสำหรับ call ทุก API
 // ✅ แก้ IP ที่นี่ที่เดียว ไม่ต้องแก้ทุกไฟล์
 
-export const BASE_URL = "http://10.175.15.135:8000"; // ชี้ไปที่ Backend ตรงกัน
+export const BASE_URL = "https://ups-regis-1api.onrender.com"; // ชี้ไปที่ Backend ตรงกัน
 //export const BASE_URL = "http://localhost:8000";
 // สำหรับเครื่องจริง: เปลี่ยนเป็น IP เครื่องคอม เช่น "http://192.168.1.x:8000"
 

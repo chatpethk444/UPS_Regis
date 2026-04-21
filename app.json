@@ -4,7 +4,7 @@
     "slug": "state",
     "version": "1.0.1",
     "orientation": "portrait",
-    "icon": "./assets/icon_UPS.png",
+    "icon": "./assets/icon_512.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {

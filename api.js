@@ -17,8 +17,8 @@ export async function apiFetch(path, options = {}) {
 
   // 1. อ่านข้อมูลเป็นข้อความดิบๆ ก่อน
   const text = await res.text();
-  let data;
 
+  let data;
   try {
     // 2. พยายามแปลงเป็น JSON ถ้าปกติจะผ่านตรงนี้ไปได้
     data = JSON.parse(text);
@@ -69,7 +69,7 @@ export const addToCartAPI = (
     body: JSON.stringify({
       student_id: String(student_id),
       course_code: String(course_code),
-      section_number: String(section_number), // 🌟 แปลงเลข 1 เป็น "1" ป้องกัน 422
+      section_number: String(section_number),
       section_type: section_type ? String(section_type) : "T",
     }),
   });
@@ -83,7 +83,7 @@ export const getCourseSectionsAPI = async (courseCode) => {
   });
 };
 
-// แก้จากของเดิมเป็นแบบนี้
+// ลบจากตะกร้า โดยไม่ต้องระบุ section_number (จะลบทุก section ของวิชานั้นๆ ออก)
 export const removeFromCartAPI = (student_id, course_code, section_type) =>
   apiFetch("/cart/remove", {
     method: "POST",
@@ -95,6 +95,7 @@ export const removeFromCartAPI = (student_id, course_code, section_type) =>
   });
 
 // --- Enrollment ---
+// ยืนยันการลงทะเบียนทั้งหมดในตะกร้า โดยจะส่งคำขอไปที่ Backend เพื่อให้ Backend ดำเนินการลงทะเบียนวิชาทั้งหมดที่อยู่ในตะกร้าของนักศึกษาคนนี้ หลังจาก Backend ดำเนินการเสร็จแล้ว จะส่งผลลัพธ์กลับมาเป็นข้อมูลของวิชาที่ลงทะเบียนสำเร็จ และวิชาที่ลงทะเบียนไม่สำเร็จ พร้อมกับเหตุผลว่าทำไมถึงไม่สำเร็จ เพื่อให้นักศึกษาสามารถตรวจสอบผลการลงทะเบียนของตัวเองได้อย่างชัดเจน
 export const confirmEnrollmentAPI = (student_id) =>
   apiFetch(`/cart/confirm/${student_id}`, { method: "POST" });
 
@@ -125,6 +126,7 @@ export const aiSuggestAPI = (student_id, course_codes) =>
   });
 
 // --- Batch ---
+// 
 export const batchAddRequiredAPI = async (student_id) => {
   const courses = await getAvailableCoursesAPI(student_id);
   const required = courses.filter((c) => c.is_required);
@@ -158,7 +160,6 @@ export const leaveGroupAPI = (student_id) =>
 export const deleteGroupAPI = (leader_id) =>
   apiFetch(`/group/delete/${leader_id}`, { method: "DELETE" });
 
-// เพิ่มต่อท้ายใน api.js
 export const toggleReadyAPI = (student_id) =>
   apiFetch(`/group/ready/${student_id}`, { method: "POST" });
 

@@ -287,3 +287,9 @@ export const searchStudentsAPI = (query) =>
   apiFetch(`/admin/students/search?query=${encodeURIComponent(query)}`, {
     method: "GET",
   });
+
+export const recountSeatsAPI = (admin_id, course_id, section_number, section_type) =>
+  apiFetch("/admin/recount-seats", {
+    method: "POST",
+    body: JSON.stringify({ admin_id, course_id, section_number, section_type }),
+  });

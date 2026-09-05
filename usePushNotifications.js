@@ -43,7 +43,12 @@ export const usePushNotifications = (student_id) => {
       });
     }
 
-    if (Device.isDevice) {
+    // v2: emulator (เช่น BlueStacks) Device.isDevice=false + อาจไม่มี FCM
+    // ลองขอ token ตรงๆ แล้ว log สาเหตุที่ fail ให้เห็นใน Metro แทนเงียบหาย
+    if (!Device.isDevice) {
+      console.log("⚠️ Push: ไม่ใช่เครื่องจริง (emulator?) ข้ามการขอ token — push จะไม่เข้าเครื่องนี้");
+    }
+    try {
       const { status: existingStatus } =
         await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
@@ -54,7 +59,7 @@ export const usePushNotifications = (student_id) => {
       }
 
       if (finalStatus !== "granted") {
-        alert("ไม่สามารถขอสิทธิ์แจ้งเตือนได้!");
+        console.log("⚠️ Push: ไม่ได้สิทธิ์แจ้งเตือน (" + finalStatus + ")");
         return;
       }
 
@@ -68,7 +73,10 @@ export const usePushNotifications = (student_id) => {
       console.log("========== EXPO PUSH TOKEN ==========");
       console.log(token);
       console.log("=====================================");
-    } 
+    } catch (e) {
+      // emulator ไม่มี Play Services / ไม่มีเน็ต FCM จะตกตรงนี้
+      console.log("⚠️ Push: ขอ token ไม่สำเร็จ:", e?.message || e);
+    }
 
     return token;
   }

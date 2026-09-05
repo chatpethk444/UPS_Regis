@@ -97,6 +97,13 @@ const CustomAlert = ({
   );
 };
 
+// backend ส่ง ISO มี offset (+00:00) — ใช้ตรงๆ ถ้ามี tz อยู่แล้ว เติม Z เฉพาะ naive
+const parseServerDate = (s) => {
+  if (!s) return null;
+  if (/[Zz]$|[+-]\d{2}:?\d{2}$/.test(s)) return new Date(s);
+  return new Date(s + "Z");
+};
+
 const WaitlistCard = ({
   course_id,
   course_name,
@@ -117,10 +124,8 @@ const WaitlistCard = ({
     if (status !== "ALLOCATED" || !allocated_at) return;
     const calculateTimeLeft = () => {
       const now = new Date();
-      const validDateStr = allocated_at.endsWith("Z")
-        ? allocated_at
-        : allocated_at + "Z";
-      const allocatedTime = new Date(validDateStr);
+      const allocatedTime = parseServerDate(allocated_at);
+      if (!allocatedTime || isNaN(allocatedTime.getTime())) return 0;
       const diffInSecs = Math.floor((now - allocatedTime) / 1000);
       const remaining = 1800 - diffInSecs;
       return remaining > 0 ? remaining : 0;
@@ -141,10 +146,8 @@ const WaitlistCard = ({
   };
 
   const formatJoinedDate = (dateString) => {
-    if (!dateString) return "";
-    const date = new Date(
-      dateString.endsWith("Z") ? dateString : dateString + "Z",
-    );
+    const date = parseServerDate(dateString);
+    if (!date || isNaN(date.getTime())) return "-";
     return date.toLocaleString("th-TH", {
       day: "2-digit",
       month: "short",

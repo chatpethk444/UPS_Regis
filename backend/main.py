@@ -100,6 +100,19 @@ def section_type_of(sec) -> str:
     return get_section_type_from_room(getattr(sec, "room", "") or "" if sec is not None else "")
 
 
+# v2: ใช้ aware UTC ทุกที่ใน waitlist flow (DB เป็น TIMESTAMPTZ คืนค่าแบบ aware)
+# เคยบั๊ก: utcnow() naive ลบ allocated_at aware -> TypeError -> 500 ตอนกดยืนยันสิทธิ์
+def utcnow_aware():
+    return datetime.datetime.now(datetime.timezone.utc)
+
+def seconds_since(ts):
+    if ts is None:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=datetime.timezone.utc)
+    return (utcnow_aware() - ts).total_seconds()
+
+
 # ฟังก์ชันนี้จะเช็คว่าในแผนการเรียนที่ส่งมา มีเวลาเรียนชนกันเองหรือไม่ โดยจะเช็คจากวันและเวลาที่เรียน
 def is_conflict(plan: list) -> bool:
     used_times = []
@@ -303,6 +316,12 @@ class PushTokenUpdate(BaseModel):
 class PasswordChangeRequest(BaseModel):
     old_password: str
     new_password: str
+
+class RecountRequest(BaseModel):
+    admin_id: str
+    course_id: str
+    section_number: int
+    section_type: str
 
 # ---------------- Endpoints ----------------
 
@@ -953,7 +972,7 @@ def withdraw_course(data: dict, db: Session = Depends(get_db)):
     sec_num_int = extract_section_int(sec_num_str)
     next_in_q = db.query(Waitlist).with_for_update().filter(Waitlist.course_id == course_code, Waitlist.section_number == sec_num_int, Waitlist.section_type == sec_type, Waitlist.status == WaitlistStatus.PENDING).order_by(Waitlist.created_at.asc()).first()
     if next_in_q:
-        next_in_q.status, next_in_q.allocated_at = WaitlistStatus.ALLOCATED, datetime.datetime.utcnow()
+        next_in_q.status, next_in_q.allocated_at = WaitlistStatus.ALLOCATED, utcnow_aware()
         student_q = db.query(Student).filter(Student.student_id == next_in_q.student_id).first()
         if student_q and student_q.expo_push_token:
             try: send_push_message(token=student_q.expo_push_token, title="ถึงคิวของคุณแล้ว! 🎉", message=f"วิชา {course_label} ว่างแล้ว! ยืนยันสิทธิ์ใน 30 นาที", extra={"course_id": course_code, "screen": "Waitlist"})
@@ -1033,7 +1052,8 @@ def confirm_waitlist_seat(waitlist_id: int, db: Session = Depends(get_db)):
     entry = db.query(Waitlist).filter(Waitlist.id == waitlist_id).first()
     if not entry: raise HTTPException(status_code=404, detail="ไม่พบข้อมูลคิว")
     if entry.status != WaitlistStatus.ALLOCATED: raise HTTPException(status_code=400, detail="สถานะไม่ถูกต้อง")
-    if (datetime.datetime.utcnow() - entry.allocated_at).total_seconds() > 1800:
+    elapsed = seconds_since(entry.allocated_at)
+    if elapsed is None or elapsed > 1800:
         entry.status = WaitlistStatus.EXPIRED; db.commit()
         raise HTTPException(status_code=400, detail="หมดเวลายืนยันสิทธิ์ 30 นาที")
     already = db.query(Enrollment).filter(Enrollment.student_id == entry.student_id, Enrollment.course_id == entry.course_id, Enrollment.section_type == entry.section_type).first()
@@ -1060,7 +1080,7 @@ def cancel_waitlist_seat(waitlist_id: int, db: Session = Depends(get_db)):
     db.delete(waitlist); db.commit()
     if was_alloc:
         next_w = db.query(Waitlist).filter(Waitlist.course_id == c_id, Waitlist.section_number == s_num, Waitlist.section_type == s_type, Waitlist.status == WaitlistStatus.PENDING).order_by(Waitlist.created_at.asc()).first()
-        if next_w: next_w.status, next_w.allocated_at = WaitlistStatus.ALLOCATED, datetime.datetime.utcnow(); db.commit()
+        if next_w: next_w.status, next_w.allocated_at = WaitlistStatus.ALLOCATED, utcnow_aware(); db.commit()
         else:
             secs = db.query(ClassSection).filter(ClassSection.course_id == c_id, ClassSection.section_number == s_num).all()
             target = next((s for s in secs if section_type_of(s) == s_type), None)
@@ -1239,8 +1259,34 @@ def search_students(query: str, db: Session = Depends(get_db)):
         })
     return results
 
-# ================= 10. Others =================
-# ฟังก์ชันนี้จะช่วยให้นักศึกษาสามารถอัพเดต Expo Push Token ของตัวเองได้ เพื่อใช้ในการรับการแจ้งเตือนผ่านระบบ push notification โดยรับข้อมูลรหัสนักศึกษา ผ่าน URL parameter และข้อมูล Expo Push Token ใหม่ ผ่าน JSON body แล้วจะเช็คว่านักศึกษาคนนี้มีอยู่ในระบบไหม ถ้าไม่มี จะส่ง error 404 กลับไป ถ้ามี จะอัพเดตค่า Expo Push Token ของนักศึกษาคนนี้ในฐานข้อมูลให้เป็นค่าใหม่ที่ได้รับมา หลังจากอัพเดตค่า Expo Push Token เสร็จแล้ว จะส่งข้อความยืนยันกลับไปว่า อัพเดตสำเร็จ
+# ซ่อมตัวนับที่นั่ง: enrolled = ลงทะเบียนจริง + hold ที่ ALLOCATED อยู่
+# ใช้เมื่อตัวเลขนับเพี้ยน (เช่น test มือ, hold ค้างจากบั๊กเก่า)
+@app.post("/admin/recount-seats")
+def recount_seats(data: RecountRequest, db: Session = Depends(get_db)):
+    require_admin(db, data.admin_id)
+    secs = db.query(ClassSection).filter(
+        ClassSection.course_id == data.course_id,
+        ClassSection.section_number == data.section_number).all()
+    target = next((s for s in secs if section_type_of(s) == data.section_type), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="ไม่พบกลุ่มเรียน")
+    n_enroll = db.query(Enrollment).filter(
+        Enrollment.course_id == data.course_id,
+        Enrollment.section_number == data.section_number,
+        Enrollment.section_type == data.section_type).count()
+    n_hold = db.query(Waitlist).filter(
+        Waitlist.course_id == data.course_id,
+        Waitlist.section_number == data.section_number,
+        Waitlist.section_type == data.section_type,
+        Waitlist.status == WaitlistStatus.ALLOCATED).count()
+    old = target.enrolled_seats or 0
+    target.enrolled_seats = n_enroll + n_hold
+    db.commit()
+    return {"course_id": data.course_id, "section_number": data.section_number,
+            "section_type": data.section_type, "old": old,
+            "new": target.enrolled_seats, "enrolled": n_enroll, "holds": n_hold}
+
+# ================= 10. Others =================# ฟังก์ชันนี้จะช่วยให้นักศึกษาสามารถอัพเดต Expo Push Token ของตัวเองได้ เพื่อใช้ในการรับการแจ้งเตือนผ่านระบบ push notification โดยรับข้อมูลรหัสนักศึกษา ผ่าน URL parameter และข้อมูล Expo Push Token ใหม่ ผ่าน JSON body แล้วจะเช็คว่านักศึกษาคนนี้มีอยู่ในระบบไหม ถ้าไม่มี จะส่ง error 404 กลับไป ถ้ามี จะอัพเดตค่า Expo Push Token ของนักศึกษาคนนี้ในฐานข้อมูลให้เป็นค่าใหม่ที่ได้รับมา หลังจากอัพเดตค่า Expo Push Token เสร็จแล้ว จะส่งข้อความยืนยันกลับไปว่า อัพเดตสำเร็จ
 @app.post("/students/{student_id}/push-token")
 def update_push_token(student_id: str, data: PushTokenUpdate, db: Session = Depends(get_db)):
     student = db.query(Student).filter(Student.student_id == student_id).first()
@@ -1270,7 +1316,7 @@ def change_password(student_id: str, data: PasswordChangeRequest, db: Session = 
 def process_waitlist_expiry():
     db = SessionLocal()
     try:
-        expiry_time = datetime.datetime.utcnow() - datetime.timedelta(minutes=30)
+        expiry_time = utcnow_aware() - datetime.timedelta(minutes=30)
         expired = db.query(Waitlist).filter(Waitlist.status == WaitlistStatus.ALLOCATED, Waitlist.allocated_at <= expiry_time).all()
         for entry in expired:
             entry.status = WaitlistStatus.EXPIRED
@@ -1282,7 +1328,7 @@ def process_waitlist_expiry():
                 Waitlist.status == WaitlistStatus.PENDING
             ).order_by(Waitlist.created_at.asc()).first()
             if next_w: 
-                next_w.status, next_w.allocated_at = WaitlistStatus.ALLOCATED, datetime.datetime.utcnow()
+                next_w.status, next_w.allocated_at = WaitlistStatus.ALLOCATED, utcnow_aware()
                 # Send Push Notification
                 student_q = db.query(Student).filter(Student.student_id == next_w.student_id).first()
                 if student_q and student_q.expo_push_token:
@@ -1294,6 +1340,14 @@ def process_waitlist_expiry():
                             extra={"course_id": next_w.course_id, "screen": "Waitlist"}
                         )
                     except Exception as e: print(f"Push Error: {e}")
+            else:
+                # v2: หมดเวลาแล้วไม่มีคนต่อคิว -> คืนที่นั่งที่ hold ไว้ (เดิมค้างเป็น phantom seat)
+                secs = db.query(ClassSection).filter(
+                    ClassSection.course_id == entry.course_id,
+                    ClassSection.section_number == entry.section_number).all()
+                tgt = next((s for s in secs if section_type_of(s) == entry.section_type), None)
+                if tgt and (tgt.enrolled_seats or 0) > 0:
+                    tgt.enrolled_seats -= 1
         db.commit()
     except Exception as e: 
         print(f"Waitlist Scheduler Error: {e}")
@@ -1318,7 +1372,7 @@ def allocate_waitlist_seats():
                     Waitlist.status == WaitlistStatus.PENDING
                 ).order_by(Waitlist.queue_position.asc()).limit(avail).all()
                 for entry in next_in_line: 
-                    entry.status, entry.allocated_at = WaitlistStatus.ALLOCATED, datetime.datetime.utcnow()
+                    entry.status, entry.allocated_at = WaitlistStatus.ALLOCATED, utcnow_aware()
                     # Send Push Notification
                     student_q = db.query(Student).filter(Student.student_id == entry.student_id).first()
                     if student_q and student_q.expo_push_token:

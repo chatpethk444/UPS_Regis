@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { MaterialIcons, Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { NavBar } from "../components/shared";
 // 🌟 1. Import getScheduleAPI เข้ามาเพื่อดึงวิชาที่เคยลงทะเบียนแล้ว
 import {
   getCartAPI,
@@ -1005,36 +1006,7 @@ export default function CartScreen({ student, setView }) {
           )}
         </ScrollView>
 
-        <View style={styles.bottomNav}>
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setView("MENU")}
-          >
-            <MaterialIcons name="home" size={24} color="#837375" />
-            <Text style={styles.navText}>HOME</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setView("MANUAL")}
-          >
-            <MaterialIcons name="list" size={24} color="#837375" />
-            <Text style={styles.navText}>COURSES</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.navItemActive}>
-            <MaterialIcons name="shopping-cart" size={24} color="#a73355" />
-            <Text style={styles.navTextActive}>CART</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setView("SCHEDULE")}
-          >
-            <MaterialIcons name="calendar-today" size={24} color="#837375" />
-            <Text style={styles.navText}>SCHEDULE</Text>
-          </TouchableOpacity>
-        </View>
+        <NavBar setView={setView} active="CART" />
         {/* 🌟 โค้ดที่เพิ่มใหม่: หน้าตา Pop-up 🌟 */}
         <Modal visible={modalConfig.visible} transparent animationType="fade">
           <View style={styles.modalOverlay}>
@@ -1553,48 +1525,6 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
 
-  bottomNav: {
-    position: "absolute",
-    bottom: 20,
-    left: 16,
-    right: 16,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    backgroundColor: "#ffffff",
-    borderRadius: 40,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-    shadowColor: "#a73355",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.1,
-    shadowRadius: 20,
-    elevation: 10,
-    zIndex: 30,
-  },
-  navItem: { alignItems: "center", paddingHorizontal: 8, paddingVertical: 10 },
-  navItemActive: {
-    alignItems: "center",
-    backgroundColor: "#FDEEF4",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 24,
-  },
-  navText: {
-    fontSize: 9,
-    fontWeight: "bold",
-    color: "#837375",
-    marginTop: 4,
-    letterSpacing: 0.5,
-  },
-  navTextActive: {
-    fontSize: 9,
-    fontWeight: "bold",
-    color: "#a73355",
-    marginTop: 4,
-    letterSpacing: 0.5,
-  },
-
   emptyBox: { alignItems: "center", marginTop: 100 },
   emptyText: { fontSize: 16, color: "#837375", marginTop: 10 },
 
@@ -1708,39 +1638,5 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 12,
     marginBottom: 8,
-  },
-
-  bottomNav: {
-    position: "absolute",
-    bottom: 20,
-    left: 16,
-    right: 16,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    backgroundColor: "#ffffff",
-    borderRadius: 40,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-    elevation: 10,
-    shadowColor: "#a73355",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.1,
-    shadowRadius: 20,
-  },
-  navItem: { alignItems: "center", paddingHorizontal: 8 },
-  navText: { fontSize: 9, fontWeight: "bold", color: "#837375", marginTop: 4 },
-  navItemActive: {
-    alignItems: "center",
-    backgroundColor: "#f5ebed",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 24,
-  },
-  navTextActive: {
-    fontSize: 9,
-    fontWeight: "bold",
-    color: "#a73355",
-    marginTop: 4,
   },
 });

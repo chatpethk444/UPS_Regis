@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { NavBar } from "../components/shared";
 import {
   getWaitlistStatusAPI,
   confirmWaitlistSeatAPI,
@@ -494,6 +495,7 @@ const WaitlistScreen = ({ setView, student }) => {
             </View>
           )}
         </ScrollView>
+        <NavBar setView={setView} />
       </SafeAreaView>
 
       {/* 🌟 เรียกใช้ Custom Alert */}
@@ -531,7 +533,7 @@ const styles = StyleSheet.create({
     paddingLeft: 8,
   },
   headerTitle: { fontSize: 20, fontWeight: "bold", color: "#a73355" },
-  scrollContent: { padding: 16, paddingBottom: 40 },
+  scrollContent: { padding: 16, paddingBottom: 120 },
   emptyContainer: { marginTop: 100, alignItems: "center", opacity: 0.6 },
   emptyText: { fontSize: 16, color: "#837375", marginTop: 10 },
   card: {

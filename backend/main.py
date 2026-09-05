@@ -6,10 +6,10 @@ from typing import List, Optional
 from fastapi import FastAPI, Depends, HTTPException, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import cast, String, func
 from pydantic import BaseModel
 from apscheduler.schedulers.background import BackgroundScheduler
 from itertools import product
+import bcrypt
 
 # Import models and database configuration
 from database import (
@@ -37,10 +37,11 @@ DAY_ORDER = {
 }
 
 # ---------------- Middleware ----------------
-# อนุญาตให้ทุกโดเมนเข้าถึง API ได้ เพื่อรองรับการเรียกจากแอปมือถือและเว็บที่อาจโฮสต์อยู่คนละที่
+# อนุญาตเฉพาะ origin local/LAN (dev Expo web + มือถือเทส) ไม่เปิด * รับทุกเว็บ
+# native app (Expo Go) ไม่โดน CORS อยู่แล้ว มีผลเฉพาะเบราว์เซอร์
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.16\.\d+\.\d+)(:\d+)?",
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -184,6 +185,71 @@ def generate_random_code():
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
 
+# ฟังก์ชันนี้สร้าง hash bcrypt ใหม่ ($2b$ เข้ากันได้กับ pgcrypto และ verify_password)
+def hash_password(plain_password) -> str:
+    return bcrypt.hashpw(str(plain_password).encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+# ฟังก์ชันนี้จะเช็ครหัสผ่านกับ hash ที่เก็บใน DB (bcrypt ตรง ไม่ผ่าน passlib)
+# hash สร้างจาก pgcrypto crypt('...', gen_salt('bf')) เข้ากันได้กับ bcrypt.checkpw
+# ถ้าแถวเก่าไม่มี hash (NULL) ถือว่าใช้ไม่ได้ ต้องให้แอดมินรีเซ็ต
+def verify_password(plain_password, password_hash) -> bool:
+    try:
+        if not plain_password or not password_hash:
+            return False
+        return bcrypt.checkpw(
+            str(plain_password).encode("utf-8"),
+            str(password_hash).encode("utf-8"),
+        )
+    except Exception:
+        return False
+
+
+# ฟังก์ชันนี้จะเช็คว่า admin_id ที่ส่งมาเป็นแอดมินจริงไหม (กันนศ.ยิง toggle เอง)
+def require_admin(db: Session, admin_id):
+    if not admin_id:
+        raise HTTPException(status_code=403, detail="เฉพาะผู้ดูแลระบบ")
+    admin = db.query(Admin).filter(Admin.admin_id == admin_id).first()
+    if not admin:
+        raise HTTPException(status_code=403, detail="เฉพาะผู้ดูแลระบบ")
+    return admin
+
+# ---------------- Login rate limit (กัน brute force รหัส) ----------------
+# in-memory ต่อ instance: ผิดเกิน 5 ครั้งใน 15 นาที -> ล็อก 15 นาที (429)
+# ข้อจำกัด: รีสตาร์ทแล้วตัวนับหาย, หลาย instance นับแยกกัน — พอสำหรับ demo
+LOGIN_MAX_FAILS = 5
+LOGIN_WINDOW_MINUTES = 15
+_LOGIN_FAILS = {}  # key -> [datetime, ...]
+
+def _prune_login_fails(key: str, now: datetime.datetime):
+    cutoff = now - datetime.timedelta(minutes=LOGIN_WINDOW_MINUTES)
+    recent = [t for t in _LOGIN_FAILS.get(key, []) if t > cutoff]
+    if recent:
+        _LOGIN_FAILS[key] = recent
+    else:
+        _LOGIN_FAILS.pop(key, None)
+    return recent
+
+def check_login_rate_limit(key: str):
+    if not key:
+        return
+    now = datetime.datetime.utcnow()
+    if len(_prune_login_fails(key, now)) >= LOGIN_MAX_FAILS:
+        raise HTTPException(
+            status_code=429,
+            detail=f"พยายามเข้าสู่ระบบผิดเกินกำหนด กรุณารอ {LOGIN_WINDOW_MINUTES} นาทีแล้วลองใหม่",
+        )
+
+def record_login_fail(key: str):
+    if not key:
+        return
+    _LOGIN_FAILS.setdefault(key, []).append(datetime.datetime.utcnow())
+
+def clear_login_fails(key: str):
+    if key:
+        _LOGIN_FAILS.pop(key, None)
+
+
 # ---------------- Pydantic Models ----------------
 class LoginRequest(BaseModel):
     student_id: str
@@ -218,6 +284,10 @@ class WaitlistJoinRequest(BaseModel):
 class PushTokenUpdate(BaseModel):
     push_token: str
 
+class PasswordChangeRequest(BaseModel):
+    old_password: str
+    new_password: str
+
 # ---------------- Endpoints ----------------
 
 # ================= 1. Login =================
@@ -225,10 +295,16 @@ class PushTokenUpdate(BaseModel):
 @app.post("/login")
 def login(request: dict, db: Session = Depends(get_db)):
     req_student_id = request.get("student_id")
-    
-    # 1. เช็คในตาราง Admin ก่อน
+    req_password = request.get("password")
+    check_login_rate_limit(req_student_id)
+
+    # 1. เช็คในตาราง Admin ก่อน + เช็ครหัสผ่าน (v2: เทียบ bcrypt hash)
     admin = db.query(Admin).filter(Admin.admin_id == req_student_id).first()
     if admin:
+        if not verify_password(req_password, admin.password_hash):
+            record_login_fail(req_student_id)
+            raise HTTPException(status_code=401, detail="รหัสผ่านไม่ถูกต้อง")
+        clear_login_fails(req_student_id)
         return {
             "student_id": admin.admin_id,
             "first_name": admin.name,
@@ -245,6 +321,10 @@ def login(request: dict, db: Session = Depends(get_db)):
 
     student = db.query(Student).filter(Student.student_id == req_student_id).first()
     if student:
+        if not verify_password(req_password, student.password_hash):
+            record_login_fail(req_student_id)
+            raise HTTPException(status_code=401, detail="รหัสผ่านไม่ถูกต้อง")
+        clear_login_fails(req_student_id)
         return {
             "student_id": student.student_id,
             "first_name": student.name,
@@ -258,7 +338,8 @@ def login(request: dict, db: Session = Depends(get_db)):
             "current_semester": student.current_semester or 1,
             "role": "STUDENT"
         }
-    
+
+    record_login_fail(req_student_id)
     raise HTTPException(status_code=401, detail="ไม่พบรหัสผู้ใช้งานนี้ในระบบ")
 
 # ================= 2. Courses =================
@@ -443,8 +524,6 @@ def ai_suggest(data: dict, db: Session = Depends(get_db)):
 # ฟังก์ชันนี้จะช่วยเพิ่มวิชาลงในตะกร้าของนักศึกษา โดยรับข้อมูลรหัสนักศึกษา รหัสวิชา หมายเลขกลุ่มเรียน และประเภทกลุ่มเรียน (ทฤษฎีหรือปฏิบัติ) แล้วจะเช็คว่าระบบเปิดรับการลงทะเบียนอยู่หรือไม่ ถ้าไม่เปิด จะส่ง error 400 กลับไป ถ้าเปิด จะเช็คว่ากลุ่มเรียนนี้มีอยู่จริงในระบบไหม ถ้าไม่มี จะถือว่าเป็นกลุ่มทฤษฎีโดยดีฟอลต์ แล้วจะเช็คว่านักศึกษาคนนี้ได้ลงทะเบียนวิชานี้ไปแล้วหรือยัง ถ้าลงทะเบียนไปแล้ว จะส่ง error 400 กลับไปพร้อมกับข้อความว่า ลงทะเบียนวิชานี้ไปแล้ว ถ้ายังไม่ลงทะเบียน จะเช็คว่าวิชานี้มีอยู่ในตะกร้าแล้วหรือยัง ถ้ามีแล้ว จะส่ง error 400 กลับไปพร้อมกับข้อความว่า วิชานี้มีอยู่ในตะกร้าแล้ว ถ้ายังไม่มี จะเพิ่มวิชานี้ลงในตะกร้า และส่งข้อความยืนยันกลับไป
 @app.post("/cart/add")
 def add_to_cart(request: CartRequest, db: Session = Depends(get_db)):
-    if not is_regis_open(db):
-        raise HTTPException(status_code=400, detail="ขณะนี้ระบบปิดรับการลงทะเบียนชั่วคราว")
     sec_num_str = request.section_number
     sec_int = extract_section_int(sec_num_str)
     section_type = request.section_type
@@ -529,7 +608,6 @@ def view_cart(student_id: str, db: Session = Depends(get_db)):
 # ฟังก์ชันนี้จะช่วยเพิ่มหลายๆ วิชาเข้าไปในตะกร้าพร้อมกัน โดยรับข้อมูลรหัสนักศึกษา และรายการวิชาที่ต้องการเพิ่ม (รหัสวิชา หมายเลขกลุ่มเรียน และประเภทกลุ่มเรียน) แล้วจะเช็คว่าระบบเปิดรับการลงทะเบียนอยู่หรือไม่ ถ้าไม่เปิด จะส่ง error 400 กลับไป ถ้าเปิด จะเช็คว่ากลุ่มเรียนแต่ละวิชาที่ต้องการเพิ่มมีอยู่จริงในระบบไหม ถ้าไม่มี จะถือว่าเป็นกลุ่มทฤษฎีโดยดีฟอลต์ แล้วจะเช็คว่านักศึกษาคนนี้ได้ลงทะเบียนวิชานั้นๆ ไปแล้วหรือยัง ถ้าลงทะเบียนไปแล้ว จะส่ง error 400 กลับไปพร้อมกับข้อความว่า ลงทะเบียนวิชานี้ไปแล้ว ถ้ายังไม่ลงทะเบียน จะเช็คว่าวิชานี้มีอยู่ในตะกร้าแล้วหรือยัง ถ้ามีแล้ว จะส่ง error 400 กลับไปพร้อมกับข้อความว่า วิชานี้มีอยู่ในตะกร้าแล้ว ถ้ายังไม่มี จะเพิ่มวิชานี้ลงในตะกร้า และส่งข้อความยืนยันกลับไป แต่ถ้ามีวิชาไหนที่มีเวลาเรียนชนกันระหว่างกันเอง หรือชนกับวิชาที่อยู่ในตารางเรียนปัจจุบันของนักศึกษา จะส่ง error 400 กลับไปพร้อมกับรายละเอียดว่าชนกับวิชาไหน วันไหน เวลาไหน และแนะนำกลุ่มเรียนอื่นที่ไม่มีเวลาชนกันให้ถ้ามี
 @app.post("/cart/batch_add_with_check")
 def batch_add_cart(req: BatchCartRequest, db: Session = Depends(get_db)):
-    if not is_regis_open(db): raise HTTPException(status_code=400, detail="ขณะนี้ระบบปิดรับการลงทะเบียนชั่วคราว")
     cart_items = db.query(EnrollmentCart).filter(EnrollmentCart.student_id == req.student_id).all()
     def get_time_slots(course_code, sec_num, sec_type):
         slots = db.query(ClassSection).filter(ClassSection.course_id == course_code, ClassSection.section_number == extract_section_int(sec_num)).all()
@@ -659,7 +737,8 @@ def get_my_group(student_id: str, db: Session = Depends(get_db)):
     if not member_info: return {"group": None}
     group = db.query(StudyGroup).filter(StudyGroup.group_id == member_info.group_id).first()
     members = db.query(GroupMember, Student).join(Student, GroupMember.student_id == Student.student_id).filter(GroupMember.group_id == group.group_id).all()
-    raw_cart = db.query(EnrollmentCart, Course, ClassSection).join(Course, EnrollmentCart.course_id == Course.course_id).outerjoin(ClassSection, (EnrollmentCart.course_id == ClassSection.course_id) & (EnrollmentCart.section_number == cast(ClassSection.section_number, String))).filter(EnrollmentCart.student_id == group.leader_id).all()
+    # v2: section_number เป็น INT ทั้ง 3 ตารางแล้ว เทียบตรงได้เลย (เดิมต้อง cast เพราะ cart เป็น String)
+    raw_cart = db.query(EnrollmentCart, Course, ClassSection).join(Course, EnrollmentCart.course_id == Course.course_id).outerjoin(ClassSection, (EnrollmentCart.course_id == ClassSection.course_id) & (EnrollmentCart.section_number == ClassSection.section_number)).filter(EnrollmentCart.student_id == group.leader_id).all()
     processed_cart = {}
     for ec, c, cs in raw_cart:
         current_sec_type = get_section_type_from_room(cs.room or "") if cs else "-"
@@ -717,7 +796,6 @@ def register_group_all(leader_id: str, db: Session = Depends(get_db)):
 # ฟังก์ชันนี้จะช่วยให้หัวหน้ากลุ่มสามารถซิงค์ตะกร้าของตัวเองให้กับสมาชิกที่ได้รับการอนุมัติในกลุ่มได้ โดยรับข้อมูลรหัสนักศึกษา ผ่าน URL parameter แล้วจะเช็คว่าระบบเปิดรับการลงทะเบียนอยู่หรือไม่ ถ้าไม่เปิด จะส่ง error 400 กลับไป ถ้าเปิด จะเช็คว่ากลุ่มเรียนของหัวหน้าคนนี้มีอยู่ไหม ถ้าไม่มี จะส่ง error 404 กลับไป ถ้ามีกลุ่มเรียน จะดึงรายการสมาชิกที่ได้รับการอนุมัติในกลุ่มนี้มาเช็คว่าสมาชิกทุกคนพร้อมสำหรับการลงทะเบียนแบบกลุ่มไหม ถ้ามีสมาชิกคนไหนที่ยังไม่พร้อม จะส่ง error 400 กลับไปพร้อมกับข้อความว่า สมาชิกยังไม่พร้อม และระบุรหัสนักศึกษาของสมาชิกคนนั้นๆ ถ้าสมาชิกทุกคนพร้อมแล้ว จะดึงรายการวิชาที่อยู่ในตะกร้าของหัวหน้ามาเช็คกับฐานข้อมูลว่านักศึกษาคนนี้ได้ลงทะเบียนวิชานั้นๆ ไปแล้วหรือยัง ถ้าลงทะเบียนไปแล้ว จะข้ามวิชานั้นไป ถ้ายังไม่ลงทะเบียน จะเช็คว่าวิชานั้นๆ มีที่นั่งว่างไหม ถ้ามีที่นั่งว่าง จะเพิ่มรายการวิชาในตะกร้าของสมาชิกแต่ละคน ถ้าไม่มีที่นั่งว่าง จะส่ง error 400 กลับไปพร้อมกับข้อความว่า วิชานี้ที่นั่งเต็มแล้ว และระบุรหัสวิชาและหมายเลขกลุ่มเรียน หลังจากทำการซิงค์ตะกร้าเสร็จแล้ว จะอัพเดต last_synced_at ของกลุ่มในตาราง StudyGroup เป็นเวลาปัจจุบัน และ last_action เป็น "SYNC" เพื่อให้สมาชิกในกลุ่มรู้ว่ากลุ่มนี้ได้ทำการซิงค์ตะกร้าเรียบร้อยแล้ว และส่งข้อความยืนยันกลับไปว่า ซิงค์ตะกร้าให้สมาชิกสำเร็จ
 @app.post("/group/sync/{leader_id}")
 def sync_group_cart(leader_id: str, db: Session = Depends(get_db)):
-    if not is_regis_open(db): raise HTTPException(status_code=400, detail="ขณะนี้ระบบปิดรับการลงทะเบียนชั่วคราว")
     group = db.query(StudyGroup).filter(StudyGroup.leader_id == leader_id).first()
     if not group: raise HTTPException(status_code=403, detail="ไม่มีสิทธิ์ Sync")
     leader_cart = db.query(EnrollmentCart).filter(EnrollmentCart.student_id == leader_id).all()
@@ -939,6 +1017,7 @@ def get_admin_config(db: Session = Depends(get_db)):
 @app.post("/admin/toggle-registration")
 def toggle_registration(request: dict, db: Session = Depends(get_db)):
     admin_id = request.get("admin_id")
+    require_admin(db, admin_id)  # v2: กันนศ./คนนอกยิง toggle เอง
     config = db.query(SystemConfig).filter(SystemConfig.key == "registration_open").first()
     if not config:
         config = SystemConfig(key="registration_open", value="true")
@@ -963,6 +1042,7 @@ def toggle_registration(request: dict, db: Session = Depends(get_db)):
 @app.post("/admin/toggle-maintenance")
 def toggle_maintenance(request: dict, db: Session = Depends(get_db)):
     admin_id = request.get("admin_id")
+    require_admin(db, admin_id)  # v2: กันนศ./คนนอกยิง toggle เอง
     config = db.query(SystemConfig).filter(SystemConfig.key == "maintenance_mode").first()
     if not config:
         config = SystemConfig(key="maintenance_mode", value="false")
@@ -1011,7 +1091,8 @@ def search_students(query: str, db: Session = Depends(get_db)):
                 ClassSection.room
             )
             .join(Course, Enrollment.course_id == Course.course_id)
-            .join(ClassSection, (Enrollment.course_id == ClassSection.course_id) & (cast(ClassSection.section_number, String) == Enrollment.section_number))
+            # v2: section_number INT ทั้งคู่ เทียบตรง (เดิม cast เพราะ enrollment เป็น String)
+            .join(ClassSection, (Enrollment.course_id == ClassSection.course_id) & (ClassSection.section_number == Enrollment.section_number))
             .outerjoin(Instructor, ClassSection.instructor_id == Instructor.instructor_id)
             .filter(Enrollment.student_id == s.student_id)
         )
@@ -1105,6 +1186,22 @@ def update_push_token(student_id: str, data: PushTokenUpdate, db: Session = Depe
     if not student: raise HTTPException(status_code=404, detail="ไม่พบข้อมูลนักศึกษา")
     student.expo_push_token = data.push_token; db.commit()
     return {"status": "success"}
+
+# เปลี่ยนรหัสผ่านนักศึกษา: เช็ครหัสเดิมก่อน แล้ว hash รหัสใหม่ทับ
+@app.post("/students/{student_id}/change-password")
+def change_password(student_id: str, data: PasswordChangeRequest, db: Session = Depends(get_db)):
+    student = db.query(Student).filter(Student.student_id == student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="ไม่พบข้อมูลนักศึกษา")
+    if not verify_password(data.old_password, student.password_hash):
+        raise HTTPException(status_code=401, detail="รหัสผ่านเดิมไม่ถูกต้อง")
+    if not data.new_password or len(data.new_password) < 6:
+        raise HTTPException(status_code=400, detail="รหัสผ่านใหม่อย่างน้อย 6 ตัวอักษร")
+    if data.old_password == data.new_password:
+        raise HTTPException(status_code=400, detail="รหัสผ่านใหม่ต้องต่างจากรหัสเดิม")
+    student.password_hash = hash_password(data.new_password)
+    db.commit()
+    return {"status": "success", "message": "เปลี่ยนรหัสผ่านสำเร็จ"}
 
 # ---------------- Background Tasks ----------------
 # ฟังก์ชันนี้จะทำงานเป็น background task ที่จะตรวจสอบการหมดเวลายืนยันสิทธิ์ของการเข้าคิวรอที่มีสถานะเป็น "ALLOCATED" อยู่ทุกๆ 1 นาที โดยจะเช็คว่าการเข้าคิวรอที่มีสถานะเป็น "ALLOCATED" นี้ได้รับสิทธิ์มาแล้วเกิน 30 นาทีหรือยัง ถ้าเกินแล้ว จะอัพเดตสถานะของการเข้าคิวรอนี้เป็น "EXPIRED" และถ้ามีคนที่อยู่ในคิวรอสำหรับวิชาและกลุ่มเรียนนี้ จะโอนสิทธิ์ให้กับคนที่อยู่ในคิวรอคนนั้นทันที และส่งข้อความแจ้งเตือนผ่านระบบ push notification ให้กับนักศึกษาคนนั้นด้วยว่า ถึงคิวของคุณแล้ว วิชานี้ว่างแล้ว ให้รีบยืนยันสิทธิ์ภายใน 30 นาที

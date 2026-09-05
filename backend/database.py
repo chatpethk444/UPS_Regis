@@ -1,11 +1,20 @@
 import datetime
 import enum
-from sqlalchemy import Column, Integer, String, Time, ForeignKey, create_engine, Index , DateTime , Boolean, Enum
-from sqlalchemy.orm import declarative_base, sessionmaker, relationship 
- 
-#postgresql://postgres.xxxxxx:YourPassword123@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres         DATABASE_URL = "postgresql://postgres.hofziopcoimjevmelbuh:111333555777999BPM@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
+import os
+from sqlalchemy import Column, Integer, String, Time, ForeignKey, create_engine, Index , DateTime , Boolean, Enum, SmallInteger, CHAR, UniqueConstraint
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
-DATABASE_URL = "postgresql://postgres.hofziopcoimjevmelbuh:111333555777999BPM@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+except ImportError:
+    pass
+
+# v2: อ่านจาก env เท่านั้น ห้าม hardcode secret (ดู .env.example)
+# รองรับชื่อเก่า OLD_DATABASE_URL ด้วยตอน migrate
+DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("OLD_DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("ตั้ง env DATABASE_URL ก่อน (ดู backend/.env.example)")
 engine = create_engine(
     DATABASE_URL,
     pool_size=10,          # จำนวน connection สูงสุดใน pool
@@ -31,8 +40,10 @@ class Student(Base):
     avatar_url = Column(String(255))
     current_year = Column(Integer)
     current_semester = Column(Integer,default=1)
-    #  password_hash = Column(String(255))  # 🔒 เพิ่มสำหรับระบบ Password ในอนาคต
+    password_hash = Column(String(255), nullable=True)  # v2: bcrypt hash, seed = '123456'
     expo_push_token = Column(String, nullable=True) # 🌟 เพิ่มตรงนี้
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
 class Admin(Base):
     __tablename__ = 'admin'
@@ -40,6 +51,7 @@ class Admin(Base):
     name = Column(String(100))
     email = Column(String(100))
     avatar_url = Column(String(255))
+    password_hash = Column(String(255), nullable=True)  # v2
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 class Instructor(Base):
@@ -58,7 +70,7 @@ class Course(Base):
 
     course_id = Column(String(20), primary_key=True)
     course_name = Column(String(150))
-    credits = Column(String(20))
+    credits = Column(SmallInteger, default=3)  # v2: INT (เดิม String) frontend parseFloat รองรับ
 
 # ---------------- ตารางโครงสร้างหลักสูตร ----------------
 class CurriculumCourse(Base):
@@ -85,15 +97,16 @@ class ClassSection(Base):
 
     section_id = Column(Integer, primary_key=True, autoincrement=True)
     course_id = Column(String(20), ForeignKey('course.course_id'), nullable=False)
-    semester = Column(String(20))
+    semester = Column(String(20), default='1/68')
     section_number = Column(Integer)
+    section_type = Column(CHAR(1), default='T')  # v2: คอลัมน์จริง 'T'/'L' (เดิม parse จาก room)
     instructor_id = Column(String(50), ForeignKey('instructor.instructor_id'))
     instructor = relationship("Instructor")
     day_of_week = Column(String(15))
     start_time = Column(Time)
     end_time = Column(Time)
-    room = Column(String(50))
-    max_seats = Column(Integer)
+    room = Column(String(50))  # เก็บ "(ท)/(ป)" ไว้เพื่อ compat โค้ดเก่า
+    max_seats = Column(Integer, default=40)
     enrolled_seats = Column(Integer, default=0)
     
 
@@ -107,10 +120,10 @@ class EnrollmentCart(Base):
     __tablename__ = 'enrollment_cart'
 
     cart_id = Column(Integer, primary_key=True, autoincrement=True)
-    student_id = Column(String(20), ForeignKey('student.student_id'), nullable=False)
-    course_id = Column(String(20), ForeignKey('course.course_id'), nullable=False)
-    section_number = Column(String(20))
-    section_type = Column(String(10))
+    student_id = Column(String(20), ForeignKey('student.student_id', ondelete="CASCADE"), nullable=False)
+    course_id = Column(String(20), ForeignKey('course.course_id', ondelete="CASCADE"), nullable=False)
+    section_number = Column(Integer)  # v2: INT (เดิม String) API ส่ง String ได้ SQLAlchemy coerce ให้
+    section_type = Column(String(10), default='T')
 
     # ✅ Index ให้ query ตะกร้าเร็วขึ้น
     __table_args__ = (
@@ -122,14 +135,16 @@ class Enrollment(Base):
     __tablename__ = 'enrollment'
 
     enroll_id = Column(Integer, primary_key=True, autoincrement=True)
-    student_id = Column(String(20), ForeignKey('student.student_id'), nullable=False)
-    course_id = Column(String(20), ForeignKey('course.course_id'), nullable=False)
-    
-    section_number = Column(String(20))
-    section_type = Column(String(10))
-    # ✅ Index ให้ดึงตารางเรียนเร็วขึ้น
+    student_id = Column(String(20), ForeignKey('student.student_id', ondelete="CASCADE"), nullable=False)
+    course_id = Column(String(20), ForeignKey('course.course_id', ondelete="CASCADE"), nullable=False)
+
+    section_number = Column(Integer)  # v2: INT
+    section_type = Column(String(10), default='T')
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    # ✅ กันลงซ้ำระดับ DB + index ดึงตารางเรียนเร็ว
     __table_args__ = (
         Index('ix_enrollment_student', 'student_id'),
+        UniqueConstraint('student_id', 'course_id', 'section_type', name='uq_enrollment_student_course_type'),
     )
 
 

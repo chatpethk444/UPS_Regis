@@ -3,6 +3,7 @@ import { Platform } from "react-native";
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
+import { BASE_URL } from "./api"; // v2: URL ศูนย์เดียวกับ api.js ห้าม hardcode IP ซ้ำ
 
 // ตั้งค่าให้แอปแสดงแจ้งเตือนแม้เปิดแอปอยู่ (Foreground)
 Notifications.setNotificationHandler({
@@ -75,7 +76,7 @@ export const usePushNotifications = (student_id) => {
   // ฟังก์ชันจำลองการยิง API ไป Backend
   const updateTokenToBackend = async (id, token) => {
     try {
-      await fetch(`http://10.175.15.135:8000/students/${id}/push-token`, {
+      await fetch(`${BASE_URL}/students/${id}/push-token`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ push_token: token }),

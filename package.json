@@ -11,17 +11,21 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.101.1",
     "axios": "^1.14.0",
-    "expo": "~54.0.33",
+    "expo": "~54.0.37",
     "expo-build-properties": "~1.0.10",
-    "expo-constants": "~18.0.13",
+    "expo-constants": "~18.0.14",
     "expo-device": "~8.0.10",
     "expo-linear-gradient": "~15.0.8",
-    "expo-notifications": "~0.32.16",
+    "expo-notifications": "~0.32.17",
     "expo-status-bar": "~3.0.9",
     "react": "19.1.0",
     "react-native": "0.81.5",
     "react-native-safe-area-context": "^5.6.2",
     "react-native-url-polyfill": "^3.0.0"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "@types/react": "~19.1.10",
+    "typescript": "~5.9.2"
+  }
 }

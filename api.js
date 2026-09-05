@@ -1,7 +1,9 @@
-// api.js — จุดเดียวสำหรับ call ทุก API
-// ✅ แก้ IP ที่นี่ที่เดียว ไม่ต้องแก้ทุกไฟล์
+// api.js — จุดเดียวสำหรับ call ทุก API (single source of truth)
+// ✅ แก้ IP ที่นี่ที่เดียว ไม่ต้องแก้ทุกไฟล์ (usePushNotifications ดึง BASE_URL จากนี่)
+// สำหรับเครื่องจริง: เปลี่ยนเป็น IP เครื่องคอม เช่น "http://192.168.1.x:8000"
 
-export const BASE_URL = "https://ups-regis-1api.onrender.com"; // ชี้ไปที่ Backend ตรงกัน
+export const BASE_URL = "http://10.172.153.135:8000"; // local backend (Wi-Fi เดียวกับมือถือ)
+//export const BASE_URL = "https://ups-regis-1api.onrender.com"; // Render เก่าโดน suspended
 //export const BASE_URL = "http://localhost:8000";
 // สำหรับเครื่องจริง: เปลี่ยนเป็น IP เครื่องคอม เช่น "http://192.168.1.x:8000"
 
@@ -17,6 +19,15 @@ export async function apiFetch(path, options = {}) {
 
   // 1. อ่านข้อมูลเป็นข้อความดิบๆ ก่อน
   const text = await res.text();
+
+  // 1.5 กัน response ไม่ใช่ JSON (เช่น หน้า HTML "Service Suspended" ของ host ล่ม)
+  // เคยเกิด: alert โชว์ HTML ดิบทั้งก้อน
+  const trimmed = text.trimStart();
+  if (trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html")) {
+    throw new Error(
+      `เซิร์ฟเวอร์ไม่ตอบสนอง (${res.status}) กรุณาตรวจสอบว่า backend ที่ ${BASE_URL} กำลังรันอยู่`,
+    );
+  }
 
   let data;
   try {
@@ -208,6 +219,13 @@ export const confirmWaitlistSeatAPI = (waitlist_id) =>
 
 export const cancelWaitlistAPI = (waitlist_id) =>
   apiFetch(`/waitlist/cancel/${waitlist_id}`, { method: "POST" });
+
+// --- Password ---
+export const changePasswordAPI = (student_id, old_password, new_password) =>
+  apiFetch(`/students/${student_id}/change-password`, {
+    method: "POST",
+    body: JSON.stringify({ old_password, new_password }),
+  });
 
 // --- Admin ---
 export const getAdminConfigAPI = () =>

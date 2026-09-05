@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { MaterialIcons, Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { NavBar } from "../components/shared";
 // 🌟 1. อย่าลืมเพิ่ม withdrawCourseAPI ไว้ใน api.js ของคุณด้วย (หรือใช้ API ถอนรายวิชาที่คุณมี)
 import { getScheduleAPI, withdrawCourseAPI } from "../api";
 
@@ -653,40 +654,7 @@ export default function ScheduleScreen({ student, setView }) {
         </ScrollView>
 
         {/* Bottom Nav */}
-        <View style={styles.bottomNav}>
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setView("MENU")}
-          >
-            <MaterialIcons name="home" size={24} color="#837375" />
-            <Text style={styles.navText}>HOME</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setView("MANUAL")}
-          >
-            <MaterialIcons name="list" size={24} color="#837375" />
-            <Text style={styles.navText}>COURSES</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setView("CART")}
-          >
-            <MaterialIcons name="shopping-cart" size={24} color="#837375" />
-            <Text style={styles.navText}>CART</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setView("SCHEDULE")}
-          >
-            <View style={styles.navItemActive}>
-              <MaterialIcons name="calendar-today" size={24} color="#a73355" />
-              <Text style={styles.navText}>SCHEDULE</Text>
-            </View>
-          </TouchableOpacity>
-        </View>
+        <NavBar setView={setView} active="SCHEDULE" />
       </SafeAreaView>
     </LinearGradient>
   );
@@ -790,48 +758,6 @@ const styles = StyleSheet.create({
 
   emptyBox: { alignItems: "center", marginTop: 100 },
   emptyText: { fontSize: 16, color: "#837375", marginTop: 10 },
-
-  bottomNav: {
-    position: "absolute",
-    bottom: 20,
-    left: 16,
-    right: 16,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    backgroundColor: "#ffffff",
-    borderRadius: 40,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-    shadowColor: "#a73355",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.1,
-    shadowRadius: 20,
-    elevation: 10,
-    zIndex: 30,
-  },
-  navItemActive: {
-    alignItems: "center",
-    backgroundColor: "#FDEEF4",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 24,
-  },
-  navTextActive: {
-    fontSize: 9,
-    fontWeight: "bold",
-    color: "#a73355",
-    marginTop: 4,
-    letterSpacing: 0.5,
-  },
-  navItem: { alignItems: "center", paddingHorizontal: 8, paddingVertical: 10 },
-  navText: {
-    fontSize: 9,
-    fontWeight: "bold",
-    color: "#837375",
-    marginTop: 4,
-    letterSpacing: 0.5,
-  },
 
   // 🌟 สไตล์สำหรับ Custom Modal (ป็อปอัพสวยๆ)
   modalOverlay: {

@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { MaterialIcons, Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { NavBar } from "../components/shared";
 
 import {
   getSuggestedCoursesAPI,
@@ -766,6 +767,7 @@ export default function RegistrationScreen({ student, setView }) {
             )}
           </ScrollView>
         )}
+        <NavBar setView={setView} />
       </SafeAreaView>
     </LinearGradient>
   );
@@ -781,7 +783,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 18, fontWeight: "900", color: "#7b5455" },
   backButton: { padding: 8, backgroundColor: "white", borderRadius: 12 },
-  scrollContent: { paddingHorizontal: 16, paddingBottom: 100 },
+  scrollContent: { paddingHorizontal: 16, paddingBottom: 120 },
   infoText: {
     fontSize: 14,
     color: "#837375",

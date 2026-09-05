@@ -10,36 +10,162 @@ import {
 } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { NavBar } from "../components/shared";
+
+const THEME = {
+  primary: "#a73355",
+  primaryDark: "#852642",
+  accent: "#D23669",
+  accentDark: "#a82d68",
+  theoryBg: "#FDEEF4",
+  cardBg: "rgba(255, 255, 255, 0.9)",
+  waitlistBg: "#FFF5F7",
+  waitlistBorder: "#FFD6DD",
+  waitlistIconBg: "#FFEBEE",
+  waitlistAccent: "#D32F2F",
+  text: "#1F1A1C",
+  textMid: "#514345",
+  textMuted: "#837375",
+  success: "#22C55E",
+  shadowColor: "#A73355",
+  white: "#FFFFFF",
+};
+
+function computeStudentYear(studentId) {
+  if (!studentId || typeof studentId !== "string" || studentId.length < 2) return 1;
+  const prefix = parseInt(studentId.substring(0, 2), 10);
+  if (isNaN(prefix)) return 1;
+  const currentYear = 68; // B.E. 2568
+  const year = currentYear - prefix + 1;
+  return year > 0 ? year : 1;
+}
+
+function ActionCard({
+  icon,
+  iconColor,
+  iconBg,
+  badge,
+  badgeStyle,
+  badgeTextStyle,
+  title,
+  description,
+  actionLabel,
+  actionIcon = "arrow-forward",
+  onPress,
+  secondaryLabel,
+  onSecondaryPress,
+  variant = "default",
+}) {
+  const isWaitlist = variant === "waitlist";
+  return (
+    <TouchableOpacity
+      style={[styles.mainCard, isWaitlist && styles.waitlistCard]}
+      activeOpacity={0.92}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${title} — ${description}`}
+    >
+      <View style={styles.cardHeader}>
+        <View style={[styles.iconBoxMain, iconBg && { backgroundColor: iconBg }]}>
+          <MaterialIcons name={icon} size={22} color={iconColor || THEME.accent} />
+        </View>
+        {badge ? (
+          <View style={[styles.badge, badgeStyle]}>
+            <Text style={[styles.badgeText, badgeTextStyle]}>{badge}</Text>
+          </View>
+        ) : null}
+      </View>
+
+      <Text style={styles.cardTitle}>{title}</Text>
+      <Text style={styles.cardDesc}>{description}</Text>
+
+      <TouchableOpacity
+        style={[styles.actionBtn, isWaitlist && styles.actionBtnWaitlist]}
+        onPress={onPress}
+        activeOpacity={0.82}
+        accessibilityRole="button"
+        accessibilityLabel={actionLabel}
+      >
+        <Text style={styles.btnText}>{actionLabel}</Text>
+        <MaterialIcons name={actionIcon} size={18} color="#FFFFFF" />
+      </TouchableOpacity>
+
+      {secondaryLabel && onSecondaryPress ? (
+        <TouchableOpacity
+          style={styles.secondaryAction}
+          onPress={onSecondaryPress}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={secondaryLabel}
+        >
+          <MaterialIcons name="playlist-add" size={18} color={THEME.primary} />
+          <Text style={styles.secondaryActionText}>{secondaryLabel}</Text>
+        </TouchableOpacity>
+      ) : null}
+    </TouchableOpacity>
+  );
+}
+
+function QuickActionCard({ icon, title, description, actionLabel, onPress }) {
+  return (
+    <TouchableOpacity
+      style={styles.subCard}
+      onPress={onPress}
+      activeOpacity={0.85}
+      accessibilityRole="button"
+      accessibilityLabel={`${title} — ${actionLabel}`}
+    >
+      <View style={styles.iconBoxSub}>
+        <MaterialIcons name={icon} size={20} color={THEME.accent} />
+      </View>
+      <Text style={styles.subCardTitle}>{title}</Text>
+      <Text style={styles.subCardDesc}>{description}</Text>
+      <View style={styles.textBtn}>
+        <Text style={styles.textBtnText}>{actionLabel}</Text>
+        <MaterialIcons name="chevron-right" size={16} color={THEME.primary} />
+      </View>
+    </TouchableOpacity>
+  );
+}
 
 export default function MenuScreen({ student, setView, onBatch, onLogout }) {
-  // คำนวณชั้นปีคร่าวๆ
-  const year = student?.student_id
-    ? 68 - parseInt(student.student_id.substring(0, 2)) + 1
-    : 1;
-  console.log(student.avatar_url);
+  const year = computeStudentYear(student?.student_id);
+  const displayName = student?.first_name || "นักศึกษา";
+  const major = student?.major || "วิศวกรรมคอมพิวเตอร์";
+  const semester = student?.current_semester || "2/2567";
+
   return (
     <LinearGradient
-      colors={["#FFDAE4", "#FFF8F8"]}
+      colors={["#FFDAE4", "#FFF5F7", "#FFFFFF"]}
+      locations={[0, 0.35, 1]}
       start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 0.3 }}
+      end={{ x: 1, y: 0.4 }}
       style={styles.container}
     >
       <SafeAreaView style={styles.safeArea}>
-        {/* Top AppBar */}
         <View style={styles.header}>
           <View style={styles.headerLeft}>
-             <Image 
-                          source={require("../assets/icon_UPS_BW.png")}
-                          style={{ width: 30, height: 30 }}
-                        />
-            <Text style={styles.headerTitle}>UPS Regis</Text>
-          </View>
-          <TouchableOpacity style={styles.bellButton}>
-            <MaterialIcons
-              name="notifications-none"
-              size={24}
-              color="#514345"
+            <Image
+              source={require("../assets/icon_UPS_BW.png")}
+              style={styles.logo}
+              accessibilityLabel="UPS Regis"
             />
+            <View style={styles.headerTitleGroup}>
+              <Text style={styles.headerTitle}>UPS Regis</Text>
+              <Text style={styles.headerSubtitle}>ภาคการศึกษา {semester}</Text>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={styles.bellButton}
+            onPress={() => setView("WAITLIST")}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="ดูรายการรอคิวและการแจ้งเตือน"
+          >
+            <MaterialIcons name="notifications-none" size={24} color={THEME.textMid} />
+            <View style={styles.notificationDot} />
           </TouchableOpacity>
         </View>
 
@@ -47,372 +173,370 @@ export default function MenuScreen({ student, setView, onBatch, onLogout }) {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          {/* Profile Section - เปลี่ยน View เป็น TouchableOpacity เพื่อให้กดได้ */}
+          {/* Profile Section */}
           <TouchableOpacity
             style={styles.profileSection}
-            activeOpacity={0.7}
+            activeOpacity={0.8}
             onPress={() => setView("PROFILE")}
+            accessibilityRole="button"
+            accessibilityLabel={`โปรไฟล์ ${displayName}`}
           >
             <View style={styles.profileImageContainer}>
-              {/* 🌟 ดึงรูปนักศึกษาจาก Database (ถ้ามีรูปถึงจะแสดง) */}
-
-              {student?.avatar_url && (
+              {student?.avatar_url ? (
                 <Image
                   source={{ uri: student.avatar_url }}
                   style={styles.profileImage}
                 />
+              ) : (
+                <View style={styles.profilePlaceholder}>
+                  <MaterialIcons name="person" size={32} color={THEME.primary} />
+                </View>
               )}
               <View style={styles.statusDot} />
             </View>
-            <View>
-              <Text style={styles.welcomeText}>
-                สวัสดี {student?.first_name || "นักศึกษา"}
-              </Text>
+            <View style={styles.profileTextBlock}>
+              <Text style={styles.welcomeText}>สวัสดี {displayName}</Text>
               <Text style={styles.majorText}>
-                {student?.major || "วิศวกรรมคอมพิวเตอร์"} ปี {year}
+                {major} · ชั้นปีที่ {year}
               </Text>
+            </View>
+            <View style={styles.profileArrowBox}>
+              <MaterialIcons name="chevron-right" size={24} color={THEME.textMuted} />
             </View>
           </TouchableOpacity>
 
-          {/* การ์ด 1: ลงทะเบียนยกชุด */}
-          <View style={styles.mainCard}>
-            <View style={styles.cardHeader}>
-              <View style={styles.iconBoxMain}>
-                <MaterialIcons name="auto-awesome" size={22} color="#D23669" />
-              </View>
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>RECOMMEND</Text>
-              </View>
-            </View>
-            <Text style={styles.cardTitle}>ลงทะเบียนวิชาภาคฯ ยกชุด</Text>
-            <Text style={styles.cardDesc}>คัดสรรวิชาตามแผนการเรียนของคุณ</Text>
+          {/* Primary Registration Action */}
+          <ActionCard
+            icon="auto-awesome"
+            badge="แนะนำ"
+            title="ลงทะเบียนวิชาภาคฯ ยกชุด"
+            description="คัดสรรวิชาตามแผนการเรียนประจำเทอมของคุณโดยอัตโนมัติ"
+            actionLabel="จัดการแผนการเรียน"
+            onPress={() => setView("REGISTRATION")}
+            secondaryLabel="เพิ่มวิชาบังคับลงตะกร้าทันที"
+            onSecondaryPress={onBatch}
+          />
 
-            <TouchableOpacity
-              style={styles.actionBtn}
-              onPress={() => setView("REGISTRATION")}
-            >
-              <Text style={styles.btnText}>จัดการแผนการเรียน</Text>
-              <MaterialIcons name="arrow-forward" size={16} color="white" />
-            </TouchableOpacity>
+          {/* Waitlist Status Action */}
+          <ActionCard
+            variant="waitlist"
+            icon="hourglass-bottom"
+            iconColor={THEME.waitlistAccent}
+            iconBg={THEME.waitlistIconBg}
+            badge="รอคิว"
+            badgeStyle={{ backgroundColor: THEME.waitlistIconBg }}
+            badgeTextStyle={{ color: THEME.waitlistAccent }}
+            title="ลำดับรอคิวและสถานะ"
+            description="ตรวจสอบสถานะคิววิชาที่เต็ม และรับสิทธิ์ยืนยันเมื่อมีที่นั่งว่าง"
+            actionLabel="ดูรายการรอคิว"
+            actionIcon="history"
+            onPress={() => setView("WAITLIST")}
+          />
+
+          {/* Planning Tools Section Header */}
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>เครื่องมือช่วยวางแผน</Text>
           </View>
 
-          {/* 🌟 การ์ดใหม่: ลำดับรอคิว (Waitlist) 🌟 */}
-          <View
-            style={[
-              styles.mainCard,
-              {
-                backgroundColor: "#fff5f7",
-                borderColor: "#ffd6dd",
-                borderWidth: 1,
-                marginTop: 16,
-              },
-            ]}
-          >
-            <View style={styles.cardHeader}>
-              <View
-                style={[styles.iconBoxMain, { backgroundColor: "#ffebee" }]}
-              >
-                <MaterialIcons
-                  name="hourglass-bottom"
-                  size={22}
-                  color="#D32F2F"
-                />
-              </View>
-              <View style={[styles.badge, { backgroundColor: "#ffebee" }]}>
-                <Text style={[styles.badgeText, { color: "#D32F2F" }]}>
-                  WAITLIST
-                </Text>
-              </View>
-            </View>
-            <Text style={styles.cardTitle}>ลำดับรอคิว (Waitlist)</Text>
-            <Text style={styles.cardDesc}>
-              ตรวจสอบสถานะและยืนยันสิทธิ์การลงทะเบียนเมื่อว่าง
-            </Text>
-
-            <TouchableOpacity
-              style={[styles.actionBtn, { backgroundColor: "#D23669" }]}
-              onPress={() => setView("WAITLIST")}
-            >
-              <Text style={styles.btnText}>ดูรายการรอคิว</Text>
-              <MaterialIcons name="history" size={16} color="white" />
-            </TouchableOpacity>
-          </View>
-
-          {/* การ์ดรอง 2 ใบ */}
+          {/* Quick Tools Grid */}
           <View style={styles.gridRow}>
-            {/* ตารางเรียนอัตโนมัติ (วิ่งไปหน้า AI ของคุณ) */}
-            <View style={styles.subCard}>
-              <View style={styles.iconBoxSub}>
-                <MaterialIcons name="event-note" size={20} color="#D23669" />
-              </View>
-              <Text style={styles.subCardTitle}>ตารางเรียนอัตโนมัติ</Text>
-              <Text style={styles.subCardDesc}>
-                จัด 2-5 แผนการเรียนที่คุณเลือกได้ตามใจ
-              </Text>
-              <TouchableOpacity
-                style={styles.textBtn}
-                onPress={() => setView("AI")}
-              >
-                <Text style={styles.textBtnText}>เริ่มสร้าง</Text>
-                <MaterialIcons name="chevron-right" size={16} color="#D23669" />
-              </TouchableOpacity>
-            </View>
-
-            {/* เพื่อนช่วยลง (วิ่งไปหน้า GROUP_SYNC) */}
-            <View style={styles.subCard}>
-              <View style={styles.iconBoxSub}>
-                <MaterialIcons name="people" size={20} color="#D23669" />
-              </View>
-              <Text style={styles.subCardTitle}>เพื่อนช่วยลง</Text>
-              <Text style={styles.subCardDesc}>
-                ซิงค์ตารางเรียนกับเพื่อนสูงสุด 5 คนแบบเรียลไทม์
-              </Text>
-              <TouchableOpacity
-                style={styles.textBtn}
-                onPress={() => setView("GROUP_SYNC")}
-              >
-                <Text style={styles.textBtnText}>รวมกลุ่ม</Text>
-                <MaterialIcons name="chevron-right" size={16} color="#D23669" />
-              </TouchableOpacity>
-            </View>
+            <QuickActionCard
+              icon="event-note"
+              title="ตารางเรียนอัตโนมัติ"
+              description="จัด 2–5 แผนการเรียนที่ไม่ชนกัน"
+              actionLabel="เริ่มสร้าง"
+              onPress={() => setView("AI")}
+            />
+            <QuickActionCard
+              icon="people"
+              title="เพื่อนช่วยลง"
+              description="ซิงค์ตารางกับเพื่อนสูงสุด 5 คน"
+              actionLabel="รวมกลุ่ม"
+              onPress={() => setView("GROUP_SYNC")}
+            />
           </View>
         </ScrollView>
 
-        {/* Floating Bottom Navigation Bar */}
-        <View style={styles.floatingNavContainer}>
-          <View style={styles.floatingNav}>
-            <TouchableOpacity style={styles.navItemActive}>
-              <MaterialIcons name="home" size={24} color="#a73355" />
-              <Text style={styles.navTextActive}>HOME</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.navItem}
-              onPress={() => setView("MANUAL")}
-            >
-              <MaterialIcons name="list" size={24} color="#837375" />
-              <Text style={styles.navText}>COURSES</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.navItem}
-              onPress={() => setView("CART")}
-            >
-              <MaterialIcons name="shopping-cart" size={24} color="#837375" />
-              <Text style={styles.navText}>CART</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.navItem}
-              onPress={() => setView("SCHEDULE")}
-            >
-              <MaterialIcons name="calendar-today" size={24} color="#837375" />
-              <Text style={styles.navText}>SCHEDULE</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+        <NavBar setView={setView} active="HOME" />
       </SafeAreaView>
     </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  safeArea: { flex: 1 },
+  container: {
+    flex: 1,
+  },
+  safeArea: {
+    flex: 1,
+  },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 24,
-    paddingTop: 16,
-    paddingBottom: 8,
+    paddingTop: 14,
+    paddingBottom: 10,
   },
-  headerLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
+  headerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  logo: {
+    width: 34,
+    height: 34,
+  },
+  headerTitleGroup: {
+    justifyContent: "center",
+  },
   headerTitle: {
     fontSize: 18,
-    fontWeight: "900",
-    color: "#514345",
-    letterSpacing: -0.5,
+    fontWeight: "700",
+    color: THEME.text,
+    letterSpacing: -0.3,
   },
-  bellButton: { padding: 4 },
-  scrollContent: { paddingHorizontal: 20, paddingBottom: 120, paddingTop: 16 },
+  headerSubtitle: {
+    fontSize: 12,
+    color: THEME.textMuted,
+    marginTop: 1,
+    fontWeight: "500",
+  },
+  bellButton: {
+    minWidth: 44,
+    minHeight: 44,
+    justifyContent: "center",
+    alignItems: "center",
+    position: "relative",
+  },
+  notificationDot: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: THEME.accent,
+    borderWidth: 1.5,
+    borderColor: "#FFFFFF",
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 120,
+    paddingTop: 8,
+  },
   profileSection: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 16,
-    marginBottom: 24,
+    gap: 14,
+    marginBottom: 20,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: "rgba(255, 255, 255, 0.6)",
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.8)",
   },
-  // 🌟 ปรับขนาดของ container ให้คงที่ กันจุดเขียวเบี้ยวเวลาไม่มีรูป
   profileImageContainer: {
     position: "relative",
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: "white",
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: THEME.white,
   },
   profileImage: {
     width: "100%",
     height: "100%",
-    borderRadius: 32,
-    borderColor: "#a82d68",
+    borderRadius: 29,
+    borderColor: THEME.accentDark,
+    borderWidth: 2,
+  },
+  profilePlaceholder: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 29,
+    backgroundColor: THEME.theoryBg,
+    justifyContent: "center",
+    alignItems: "center",
+    borderColor: THEME.accentDark,
     borderWidth: 2,
   },
   statusDot: {
     position: "absolute",
-    bottom: 2,
-    right: 2,
+    bottom: 0,
+    right: 0,
     width: 14,
     height: 14,
-    backgroundColor: "#22c55e",
+    backgroundColor: THEME.success,
     borderRadius: 7,
     borderWidth: 2,
-    borderColor: "#fff",
+    borderColor: THEME.white,
+  },
+  profileTextBlock: {
+    flex: 1,
   },
   welcomeText: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: "#1f1a1c",
-    letterSpacing: 1,
-    textTransform: "uppercase",
+    fontSize: 18,
+    fontWeight: "700",
+    color: THEME.text,
     marginBottom: 2,
   },
-  majorText: { fontSize: 12, fontWeight: "600", color: "#514345" },
+  majorText: {
+    fontSize: 13,
+    fontWeight: "500",
+    color: THEME.textMid,
+  },
+  profileArrowBox: {
+    width: 32,
+    height: 32,
+    justifyContent: "center",
+    alignItems: "center",
+  },
   mainCard: {
-    backgroundColor: "rgba(255, 255, 255, 0.8)",
+    backgroundColor: THEME.cardBg,
     padding: 20,
     borderRadius: 24,
     marginBottom: 16,
-    shadowColor: "rgba(167, 51, 85, 0.05)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.8)",
+    shadowColor: THEME.shadowColor,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 1,
-    shadowRadius: 12,
-    elevation: 2,
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    elevation: 3,
+  },
+  waitlistCard: {
+    backgroundColor: THEME.waitlistBg,
+    borderColor: THEME.waitlistBorder,
+    borderWidth: 1,
   },
   cardHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: 14,
   },
-  iconBoxMain: { backgroundColor: "#FDEEF4", padding: 10, borderRadius: 12 },
+  iconBoxMain: {
+    backgroundColor: THEME.theoryBg,
+    padding: 10,
+    borderRadius: 14,
+  },
   badge: {
-    backgroundColor: "#a82d68",
+    backgroundColor: THEME.accentDark,
     paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
+    paddingVertical: 5,
+    borderRadius: 14,
   },
   badgeText: {
-    fontSize: 10,
-    fontWeight: "bold",
-    color: "white",
-    letterSpacing: 0.5,
+    fontSize: 11,
+    fontWeight: "700",
+    color: THEME.white,
+    letterSpacing: 0.2,
   },
   cardTitle: {
-    fontSize: 18,
-    fontWeight: "900",
-    color: "#1f1a1c",
-    marginBottom: 8,
+    fontSize: 17,
+    fontWeight: "700",
+    color: THEME.text,
+    marginBottom: 6,
   },
   cardDesc: {
-    fontSize: 12,
-    color: "#514345",
-    marginBottom: 20,
-    lineHeight: 18,
+    fontSize: 13,
+    color: THEME.textMid,
+    marginBottom: 18,
+    lineHeight: 19,
   },
   actionBtn: {
-    backgroundColor: "#D23669",
+    backgroundColor: THEME.accent,
     flexDirection: "row",
-    paddingVertical: 14,
+    minHeight: 48,
+    paddingVertical: 13,
+    paddingHorizontal: 18,
     justifyContent: "center",
     alignItems: "center",
     borderRadius: 24,
     gap: 8,
   },
-  btnText: { color: "white", fontWeight: "bold", fontSize: 14 },
-  gridRow: { flexDirection: "row", justifyContent: "space-between", gap: 12 },
+  actionBtnWaitlist: {
+    backgroundColor: THEME.accent,
+  },
+  btnText: {
+    color: THEME.white,
+    fontWeight: "600",
+    fontSize: 14,
+  },
+  secondaryAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    marginTop: 12,
+    paddingVertical: 8,
+    minHeight: 44,
+  },
+  secondaryActionText: {
+    color: THEME.primary,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  sectionHeader: {
+    marginTop: 6,
+    marginBottom: 12,
+    paddingHorizontal: 4,
+  },
+  sectionTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: THEME.textMid,
+    letterSpacing: -0.2,
+  },
+  gridRow: {
+    flexDirection: "row",
+    gap: 12,
+  },
   subCard: {
     flex: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.8)",
+    backgroundColor: THEME.cardBg,
     padding: 16,
-    borderRadius: 20,
-    shadowColor: "rgba(167, 51, 85, 0.05)",
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.8)",
+    shadowColor: THEME.shadowColor,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 1,
-    shadowRadius: 12,
-    elevation: 2,
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    elevation: 3,
   },
   iconBoxSub: {
-    width: 36,
-    height: 36,
-    backgroundColor: "#FDEEF4",
-    borderRadius: 10,
+    width: 38,
+    height: 38,
+    backgroundColor: THEME.theoryBg,
+    borderRadius: 12,
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 12,
   },
   subCardTitle: {
     fontSize: 14,
-    fontWeight: "bold",
-    color: "#1f1a1c",
+    fontWeight: "700",
+    color: THEME.text,
     marginBottom: 6,
   },
   subCardDesc: {
-    fontSize: 10,
-    color: "#514345",
-    marginBottom: 16,
-    lineHeight: 14,
+    fontSize: 12,
+    color: THEME.textMid,
+    marginBottom: 14,
+    lineHeight: 17,
+    flex: 1,
   },
-  textBtn: { flexDirection: "row", alignItems: "center", gap: 2 },
-  textBtnText: { color: "#a73355", fontSize: 11, fontWeight: "bold" },
-  floatingNavContainer: {
-    position: "absolute",
-    bottom: 20,
-    left: 16,
-    right: 16,
-  },
-  floatingNav: {
+  textBtn: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    backgroundColor: "#ffffff",
-    borderRadius: 40,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-    shadowColor: "#a73355",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.1,
-    shadowRadius: 20,
-    elevation: 10,
+    gap: 2,
+    minHeight: 28,
   },
-  navItemActive: {
-    alignItems: "center",
-    backgroundColor: "#FDEEF4",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 24,
-  },
-  navTextActive: {
-    fontSize: 9,
-    fontWeight: "bold",
-    color: "#a73355",
-    marginTop: 4,
-    letterSpacing: 0.5,
-  },
-  navItem: { alignItems: "center", paddingHorizontal: 8, paddingVertical: 10 },
-  navText: {
-    fontSize: 9,
-    fontWeight: "bold",
-    color: "#837375",
-    marginTop: 4,
-    letterSpacing: 0.5,
-  },
-  logoutBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#FDEEF4",
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 4,
+  textBtnText: {
+    color: THEME.primary,
+    fontSize: 12,
+    fontWeight: "700",
   },
 });

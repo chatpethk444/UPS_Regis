@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from "react";
-import { supabase } from "../supabaseClient";
 import {
   View,
   Text,
@@ -16,6 +15,7 @@ import {
 } from "react-native";
 import { MaterialIcons, Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { NavBar } from "../components/shared";
 import {
   createGroupAPI,
   joinGroupAPI,
@@ -966,6 +966,7 @@ export default function GroupSyncScreen({ student, setView }) {
             </View>
           )}
         </ScrollView>
+        <NavBar setView={setView} />
       </SafeAreaView>
     </LinearGradient>
   );
@@ -982,7 +983,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 20, fontWeight: "bold", color: "#7b5455" },
   backButton: { padding: 8, backgroundColor: "white", borderRadius: 12 },
-  content: { padding: 20 },
+  content: { padding: 20, paddingBottom: 120 },
   noGroupContainer: { marginTop: 40 },
   tabContainer: { flexDirection: "row", marginBottom: 20 },
   tabBtn: {

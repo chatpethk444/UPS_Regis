@@ -15,6 +15,7 @@ import {
 
 import { MaterialIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { NavBar } from "../components/shared";
 import {
   getAvailableCoursesAPI,
   aiSuggestAPI,
@@ -1157,33 +1158,7 @@ export default function AIScreen({ student, setView }) {
           )}
         </ScrollView>
 
-        <View style={styles.bottomNav}>
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setView("MENU")}
-          >
-            <MaterialIcons name="home" size={24} color="#837375" />
-            <Text style={styles.navText}>HOME</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.navItemActive}>
-            <MaterialIcons name="auto-awesome" size={24} color="#a73355" />
-            <Text style={styles.navTextActive}>AI SCHEDULE</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setView("CART")}
-          >
-            <MaterialIcons name="shopping-cart" size={24} color="#837375" />
-            <Text style={styles.navText}>CART</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setView("SCHEDULE")}
-          >
-            <MaterialIcons name="calendar-today" size={24} color="#837375" />
-            <Text style={styles.navText}>SCHEDULE</Text>
-          </TouchableOpacity>
-        </View>
+        <NavBar setView={setView} active="COURSES" />
 
         {/* 🌟 Modal เลือกวิชาเสรี (Z-Modal) 🌟 */}
         <Modal visible={zModalVisible} transparent={true} animationType="slide">
@@ -1673,48 +1648,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   confirmBtnText: { color: "#FFF", fontSize: 14, fontWeight: "bold" },
-
-  bottomNav: {
-    position: "absolute",
-    bottom: 20,
-    left: 16,
-    right: 16,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    backgroundColor: "#ffffff",
-    borderRadius: 40,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-    shadowColor: "#a73355",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.1,
-    shadowRadius: 20,
-    elevation: 10,
-    zIndex: 30,
-  },
-  navItemActive: {
-    alignItems: "center",
-    backgroundColor: "#FDEEF4",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 24,
-  },
-  navTextActive: {
-    fontSize: 9,
-    fontWeight: "bold",
-    color: "#a73355",
-    marginTop: 4,
-    letterSpacing: 0.5,
-  },
-  navItem: { alignItems: "center", paddingHorizontal: 8, paddingVertical: 10 },
-  navText: {
-    fontSize: 9,
-    fontWeight: "bold",
-    color: "#837375",
-    marginTop: 4,
-    letterSpacing: 0.5,
-  },
 
   modalBackground: {
     flex: 1,

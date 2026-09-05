@@ -1,8 +1,183 @@
 // components/shared.js — Component และ Style ที่ใช้ร่วมกันทุก Screen
 
-import React from "react";
-import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
-import { Feather } from "@expo/vector-icons";
+import React, { useEffect, useRef } from "react";
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  Animated,
+  Platform,
+  UIManager,
+  LayoutAnimation,
+} from "react-native";
+import { Feather, MaterialIcons } from "@expo/vector-icons";
+
+if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+// ✅ NavBar ล่าง ใช้เหมือนกันทุกหน้า (ต้นแบบจาก MenuScreen)
+// active: "HOME" | "COURSES" | "CART" | "SCHEDULE" | "" (ว่าง = ไม่ไฮไลต์แท็บไหน)
+export const NAV_TABS = [
+  { key: "HOME", icon: "home", label: "หน้าแรก", view: "MENU" },
+  { key: "COURSES", icon: "menu-book", label: "รายวิชา", view: "MANUAL" },
+  { key: "CART", icon: "shopping-bag", label: "ตะกร้า", view: "CART" },
+  { key: "SCHEDULE", icon: "event", label: "ตารางเรียน", view: "SCHEDULE" },
+];
+
+const NAV_THEME = {
+  primary: "#a73355",
+  theoryBg: "#FDEEF4",
+  textMuted: "#837375",
+  white: "#FFFFFF",
+};
+
+function NavTab({ item, isActive, onPress }) {
+  const scale = useRef(new Animated.Value(1)).current;
+
+  const pressIn = () =>
+    Animated.spring(scale, {
+      toValue: 0.85,
+      useNativeDriver: true,
+      speed: 50,
+      bounciness: 10,
+    }).start();
+  const pressOut = () =>
+    Animated.spring(scale, {
+      toValue: 1,
+      useNativeDriver: true,
+      speed: 50,
+      bounciness: 10,
+    }).start();
+
+  const handlePress = () => {
+    if (isActive) return;
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    onPress();
+  };
+
+  return (
+    <Animated.View style={{ transform: [{ scale }] }}>
+      <TouchableOpacity
+        style={isActive ? navBarStyles.navItemActive : navBarStyles.navItem}
+        onPress={handlePress}
+        onPressIn={pressIn}
+        onPressOut={pressOut}
+        activeOpacity={0.75}
+        accessibilityRole="button"
+        accessibilityState={{ selected: isActive }}
+        accessibilityLabel={item.label}
+      >
+        <MaterialIcons
+          name={item.icon}
+          size={22}
+          color={isActive ? NAV_THEME.primary : NAV_THEME.textMuted}
+        />
+        <Text style={isActive ? navBarStyles.navTextActive : navBarStyles.navText}>
+          {item.label}
+        </Text>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+
+export function NavBar({ setView, active = "" }) {
+  const mountAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.spring(mountAnim, {
+      toValue: 1,
+      useNativeDriver: true,
+      speed: 22,
+      bounciness: 7,
+    }).start();
+  }, [mountAnim]);
+
+  return (
+    <View style={navBarStyles.floatingNavContainer} pointerEvents="box-none">
+      <Animated.View
+        style={[
+          navBarStyles.floatingNav,
+          {
+            opacity: mountAnim,
+            transform: [
+              {
+                translateY: mountAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [28, 0],
+                }),
+              },
+            ],
+          },
+        ]}
+      >
+        {NAV_TABS.map((item) => (
+          <NavTab
+            key={item.key}
+            item={item}
+            isActive={item.key === active}
+            onPress={() => setView(item.view)}
+          />
+        ))}
+      </Animated.View>
+    </View>
+  );
+}
+
+export const navBarStyles = StyleSheet.create({
+  floatingNavContainer: {
+    position: "absolute",
+    bottom: 20,
+    left: 16,
+    right: 16,
+  },
+  floatingNav: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "center",
+    backgroundColor: NAV_THEME.white,
+    borderRadius: 36,
+    paddingHorizontal: 6,
+    paddingVertical: 6,
+    shadowColor: NAV_THEME.primary,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 18,
+    elevation: 8,
+  },
+  navItemActive: {
+    alignItems: "center",
+    backgroundColor: NAV_THEME.theoryBg,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 22,
+    minHeight: 44,
+    justifyContent: "center",
+  },
+  navTextActive: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: NAV_THEME.primary,
+    marginTop: 2,
+    letterSpacing: 0.3,
+  },
+  navItem: {
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    minWidth: 44,
+    minHeight: 44,
+    justifyContent: "center",
+  },
+  navText: {
+    fontSize: 10,
+    fontWeight: "600",
+    color: NAV_THEME.textMuted,
+    marginTop: 2,
+    letterSpacing: 0.3,
+  },
+});
 
 // ✅ ScreenHeader ใช้ซ้ำได้ทุกหน้า
 export function ScreenHeader({ title, onBack }) {

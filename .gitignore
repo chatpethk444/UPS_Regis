@@ -31,10 +31,20 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
+backend/.env
+
+# DB backups (มี PII รหัสนศ./เกรด ห้าม commit)
+backend/supabase/backup/
 
 # typescript
 *.tsbuildinfo
+
+# python
+__pycache__/
+*.pyc
+*.pyo
 
 # generated native folders
 /ios

@@ -10,12 +10,14 @@ import {
   Dimensions,
   ActivityIndicator,
   Modal,
+  TextInput,
 } from "react-native";
 import { MaterialIcons, Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { NavBar } from "../components/shared";
 
 // Import API สำหรับดึงเกรด
-import { getStudentGradesAPI } from "../api";
+import { getStudentGradesAPI, changePasswordAPI } from "../api";
 
 const { width } = Dimensions.get("window");
 
@@ -28,6 +30,15 @@ export default function ProfileScreen({ student, setView, onLogout }) {
 
   // 🌟 1. เพิ่ม State สำหรับจัดการ Modal ออกจากระบบ
   const [isLogoutModalVisible, setLogoutModalVisible] = useState(false);
+
+  // 🌟 State สำหรับ Modal เปลี่ยนรหัสผ่าน
+  const [isPwModalVisible, setPwModalVisible] = useState(false);
+  const [oldPw, setOldPw] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [confirmPw, setConfirmPw] = useState("");
+  const [pwLoading, setPwLoading] = useState(false);
+  const [pwError, setPwError] = useState("");
+  const [pwSuccess, setPwSuccess] = useState(false);
 
   useEffect(() => {
     if (student?.student_id) {
@@ -139,6 +150,45 @@ export default function ProfileScreen({ student, setView, onLogout }) {
   const confirmLogout = () => {
     setLogoutModalVisible(false);
     onLogout();
+  };
+
+  const openPwModal = () => {
+    setOldPw("");
+    setNewPw("");
+    setConfirmPw("");
+    setPwError("");
+    setPwSuccess(false);
+    setPwModalVisible(true);
+  };
+
+  const handleChangePassword = async () => {
+    if (!oldPw || !newPw || !confirmPw) {
+      setPwError("กรุณากรอกให้ครบทุกช่อง");
+      return;
+    }
+    if (newPw.length < 6) {
+      setPwError("รหัสผ่านใหม่อย่างน้อย 6 ตัวอักษร");
+      return;
+    }
+    if (newPw !== confirmPw) {
+      setPwError("รหัสผ่านใหม่ทั้งสองช่องไม่ตรงกัน");
+      return;
+    }
+    if (oldPw === newPw) {
+      setPwError("รหัสผ่านใหม่ต้องต่างจากรหัสเดิม");
+      return;
+    }
+    setPwLoading(true);
+    setPwError("");
+    try {
+      await changePasswordAPI(student.student_id, oldPw, newPw);
+      setPwSuccess(true);
+      setTimeout(() => setPwModalVisible(false), 1500);
+    } catch (e) {
+      setPwError(e.message);
+    } finally {
+      setPwLoading(false);
+    }
   };
 
   const sortedSemesters = Object.keys(grades).sort((a, b) => {
@@ -286,6 +336,13 @@ export default function ProfileScreen({ student, setView, onLogout }) {
 
           {/* Action Buttons */}
           <View style={styles.buttonRow}>
+            <TouchableOpacity
+              style={styles.pwBtn}
+              onPress={openPwModal}
+            >
+              <MaterialIcons name="lock-outline" size={18} color="#a73355" />
+              <Text style={styles.pwBtnText}>เปลี่ยนรหัสผ่าน</Text>
+            </TouchableOpacity>
             <TouchableOpacity
               style={styles.editBtn}
               onPress={handleLogoutPress}
@@ -467,41 +524,99 @@ export default function ProfileScreen({ student, setView, onLogout }) {
           </View>
         </Modal>
 
-        {/* Bottom Navigation */}
-        <View style={styles.bottomNav}>
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setView("MENU")}
-          >
-            <MaterialIcons name="home" size={24} color="#837375" />
-            <Text style={styles.navText}>HOME</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setView("MANUAL")}
-          >
-            <MaterialIcons name="list" size={24} color="#837375" />
-            <Text style={styles.navText}>COURSES</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setView("CART")}
-          >
-            <MaterialIcons name="shopping-cart" size={24} color="#837375" />
-            <Text style={styles.navText}>CART</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.navItem}
-            onPress={() => setView("SCHEDULE")}
-          >
-            <MaterialIcons name="calendar-today" size={24} color="#837375" />
-            <Text style={styles.navText}>SCHEDULE</Text>
-          </TouchableOpacity>
-          <View style={styles.navItemActive}>
-            <MaterialIcons name="person" size={24} color="#a73355" />
-            <Text style={styles.navTextActive}>PROFILE</Text>
+        {/* 🌟 Modal เปลี่ยนรหัสผ่าน 🌟 */}
+        <Modal
+          animationType="fade"
+          transparent={true}
+          visible={isPwModalVisible}
+          onRequestClose={() => setPwModalVisible(false)}
+        >
+          <View style={styles.logoutModalOverlay}>
+            <View style={styles.logoutModalContainer}>
+              <View style={styles.logoutIconWrapper}>
+                <MaterialIcons name="lock-outline" size={32} color="#a73355" />
+              </View>
+
+              <Text style={styles.logoutTitle}>เปลี่ยนรหัสผ่าน</Text>
+
+              {pwSuccess ? (
+                <View style={{ alignItems: "center", paddingVertical: 12 }}>
+                  <MaterialIcons
+                    name="check-circle"
+                    size={48}
+                    color="#10b981"
+                  />
+                  <Text style={styles.pwSuccessText}>
+                    เปลี่ยนรหัสผ่านสำเร็จ
+                  </Text>
+                </View>
+              ) : (
+                <>
+                  <TextInput
+                    style={styles.pwInput}
+                    placeholder="รหัสผ่านเดิม"
+                    placeholderTextColor="#a89a9c"
+                    secureTextEntry
+                    value={oldPw}
+                    onChangeText={setOldPw}
+                    editable={!pwLoading}
+                  />
+                  <TextInput
+                    style={styles.pwInput}
+                    placeholder="รหัสผ่านใหม่ (≥ 6 ตัวอักษร)"
+                    placeholderTextColor="#a89a9c"
+                    secureTextEntry
+                    value={newPw}
+                    onChangeText={setNewPw}
+                    editable={!pwLoading}
+                  />
+                  <TextInput
+                    style={styles.pwInput}
+                    placeholder="ยืนยันรหัสผ่านใหม่"
+                    placeholderTextColor="#a89a9c"
+                    secureTextEntry
+                    value={confirmPw}
+                    onChangeText={setConfirmPw}
+                    editable={!pwLoading}
+                  />
+                  {pwError ? (
+                    <Text style={styles.pwErrorText}>{pwError}</Text>
+                  ) : null}
+
+                  <View style={styles.logoutButtonRow}>
+                    <TouchableOpacity
+                      style={styles.cancelLogoutBtn}
+                      onPress={() => setPwModalVisible(false)}
+                      disabled={pwLoading}
+                    >
+                      <Text style={styles.cancelLogoutText}>ยกเลิก</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.confirmLogoutBtn}
+                      onPress={handleChangePassword}
+                      disabled={pwLoading}
+                    >
+                      <LinearGradient
+                        colors={["#a73355", "#7b5455"]}
+                        style={styles.confirmLogoutGradient}
+                      >
+                        {pwLoading ? (
+                          <ActivityIndicator color="#ffffff" />
+                        ) : (
+                          <Text style={styles.confirmLogoutText}>ยืนยัน</Text>
+                        )}
+                      </LinearGradient>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+            </View>
           </View>
-        </View>
+        </Modal>
+
+        {/* Bottom Navigation */}
+        <NavBar setView={setView} />
       </SafeAreaView>
     </LinearGradient>
   );
@@ -744,6 +859,44 @@ const styles = StyleSheet.create({
   emailText: { fontSize: 12, fontWeight: "600", color: "#87193e" },
 
   buttonRow: { flexDirection: "row", gap: 12, marginTop: 8 },
+  pwBtn: {
+    flex: 1,
+    borderRadius: 12,
+    backgroundColor: "#ffffff",
+    borderWidth: 1.5,
+    borderColor: "#a73355",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+    gap: 8,
+  },
+  pwBtnText: { color: "#a73355", fontWeight: "bold", fontSize: 14 },
+  pwInput: {
+    width: "100%",
+    backgroundColor: "#faf6f7",
+    borderWidth: 1,
+    borderColor: "#e8d5da",
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    fontSize: 15,
+    color: "#1f1a1c",
+    marginBottom: 12,
+  },
+  pwErrorText: {
+    color: "#ef4444",
+    fontSize: 13,
+    fontWeight: "600",
+    textAlign: "center",
+    marginBottom: 16,
+  },
+  pwSuccessText: {
+    color: "#10b981",
+    fontSize: 16,
+    fontWeight: "bold",
+    marginTop: 12,
+  },
   editBtn: { flex: 1, borderRadius: 12, overflow: "hidden", elevation: 4 },
   editGradient: {
     flexDirection: "row",
@@ -828,39 +981,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "bold",
     color: "#ffffff",
-  },
-
-  bottomNav: {
-    position: "absolute",
-    bottom: 20,
-    left: 16,
-    right: 16,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    backgroundColor: "#ffffff",
-    borderRadius: 40,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-    elevation: 10,
-    shadowColor: "#a73355",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.1,
-    shadowRadius: 20,
-  },
-  navItem: { alignItems: "center", paddingHorizontal: 8 },
-  navText: { fontSize: 9, fontWeight: "bold", color: "#837375", marginTop: 4 },
-  navItemActive: {
-    alignItems: "center",
-    backgroundColor: "#f5ebed",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 24,
-  },
-  navTextActive: {
-    fontSize: 9,
-    fontWeight: "bold",
-    color: "#a73355",
-    marginTop: 4,
   },
 });

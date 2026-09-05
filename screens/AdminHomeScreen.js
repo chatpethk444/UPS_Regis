@@ -308,7 +308,7 @@ export default function AdminHomeScreen({ student, setView, onLogout }) {
               >
                 {isRegisOpen
                   ? "เปิดให้ลงทะเบียนปกติ"
-                  : "ปิดการลงทะเบียนชั่วคราว"}
+                  : "ปิดรับการยืนยัน (เพิ่มลงตะกร้าได้ปกติ)"}
               </Text>
             </View>
             {loadingConfig ? (

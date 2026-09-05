@@ -136,14 +136,52 @@ export const aiSuggestAPI = (student_id, course_codes) =>
   });
 
 // --- Batch ---
-// 
+// v2: ไม่ยัด Sec 1 มั่วแล้ว — ข้ามวิชาที่มีในตะกร้า/ตารางแล้ว,
+// เลือก section ที่มีที่นั่งว่าง (T ก่อน) แล้วให้ backend เช็คชนเวลาซ้ำ
+// return { added, skipped: [{course_code, reason}], conflicts? }
 export const batchAddRequiredAPI = async (student_id) => {
   const courses = await getAvailableCoursesAPI(student_id);
   const required = courses.filter((c) => c.is_required);
+  const cart = await getCartAPI(student_id).catch(() => []);
+  const schedule = await getScheduleAPI(student_id).catch(() => []);
+  const hasIn = (code) =>
+    cart.some((i) => (i.course_code || i.course_id) === code) ||
+    schedule.some((i) => (i.course_code || i.course_id) === code);
+
+  const items = [];
+  const skipped = [];
   for (const c of required) {
-    await addToCartAPI(student_id, c.course_code, "1");
+    if (hasIn(c.course_code)) {
+      skipped.push({ course_code: c.course_code, reason: "มีในตะกร้า/ตารางแล้ว" });
+      continue;
+    }
+    const secs = await getCourseSectionsAPI(c.course_code).catch(() => []);
+    const withSeats = secs.filter(
+      (s) => (s.max_seats || 0) - (s.enrolled_seats || 0) > 0,
+    );
+    // T ก่อน แล้วเลข section น้อยก่อน
+    withSeats.sort(
+      (a, b) =>
+        (a.section_type === "T" ? 0 : 1) - (b.section_type === "T" ? 0 : 1) ||
+        (parseInt(a.section_number) || 0) - (parseInt(b.section_number) || 0),
+    );
+    const pick = withSeats[0];
+    if (!pick) {
+      skipped.push({ course_code: c.course_code, reason: "ที่นั่งเต็มทุกกลุ่ม" });
+      continue;
+    }
+    items.push({
+      course_code: c.course_code,
+      section_number: String(pick.section_number),
+      section_type: pick.section_type || "T",
+    });
   }
-  return required.length;
+  if (items.length === 0) return { added: 0, skipped };
+  const res = await batchAddWithCheckAPI(student_id, items);
+  if (res && res.status === "conflict") {
+    return { added: 0, skipped, conflicts: res.conflicts || [] };
+  }
+  return { added: items.length, skipped };
 };
 
 // --- Group Sync ---

@@ -82,8 +82,28 @@ export default function App() {
     // 🌟 เปลี่ยนจาก Alert.alert เป็น showConfirm
     showConfirm("Batch Registration", "ต้องการเพิ่มวิชาบังคับลงตะกร้าหรือไม่?", async () => {
       try {
-        const count = await batchAddRequiredAPI(student.student_id);
-        showAlert("สำเร็จ", `เพิ่ม ${count} วิชาบังคับลงตะกร้าแล้ว!`);
+        const res = await batchAddRequiredAPI(student.student_id);
+        const skippedList = (res.skipped || [])
+          .map((s) => `• ${s.course_code}: ${s.reason}`)
+          .join("\n");
+        if (res.conflicts && res.conflicts.length > 0) {
+          const cList = res.conflicts
+            .map(
+              (c) =>
+                `• ${c.course_code} ขอกลุ่ม ${c.requested_section}` +
+                (c.suggested_section ? ` (ลองกลุ่ม ${c.suggested_section})` : " (ไม่มีกลุ่มว่าง)"),
+            )
+            .join("\n");
+          showAlert("เวลาเรียนชนกัน", `เพิ่มไม่ได้:\n${cList}`);
+        } else if (res.added > 0) {
+          showAlert(
+            "สำเร็จ",
+            `เพิ่ม ${res.added} วิชาบังคับลงตะกร้าแล้ว!` +
+              (skippedList ? `\n\nข้าม:\n${skippedList}` : ""),
+          );
+        } else {
+          showAlert("ไม่มีวิชาที่เพิ่มได้", skippedList || "ทุกวิชามีในตะกร้า/ตารางแล้ว");
+        }
       } catch (e) {
         showAlert("เกิดข้อผิดพลาด", e.message);
       }

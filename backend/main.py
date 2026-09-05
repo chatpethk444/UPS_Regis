@@ -66,6 +66,13 @@ def is_regis_open(db: Session):
         return True
     return config.value == "true"
 
+# v2: maintenance = โหมดอ่านอย่างเดียว บล็อกทุก endpoint เขียน
+# (ยกเว้น login/push-token/admin toggle ที่ต้องใช้ได้ตอนปิดปรับปรุง)
+def assert_writable(db: Session):
+    m = db.query(SystemConfig).filter(SystemConfig.key == "maintenance_mode").first()
+    if m and m.value == "true":
+        raise HTTPException(status_code=403, detail="ระบบปิดปรับปรุงชั่วคราว กรุณาลองใหม่ในภายหลัง")
+
 # ฟังก์ชันนี้จะช่วยคำนวณว่า นักศึกษาคนนี้อยู่ปีไหน โดยดูจากเลข 2 ตัวแรกของรหัสนักศึกษา ซึ่งเป็นปีที่เข้าเรียน เช่น ถ้าเริ่มเรียนปี 2565 รหัสจะขึ้นต้นด้วย 65 และถ้าเป็นปี 2568 จะขึ้นต้นด้วย 68 เป็นต้น โดยจะนำเลขปีปัจจุบัน (ในรูปแบบ 2 หลัก) มาลบกับเลขปีที่เข้าเรียน แล้วบวกด้วย 1 เพื่อให้ได้ชั้นปีปัจจุบันของนักศึกษา
 def calculate_student_year(student_id: str) -> int:
     try:
@@ -83,6 +90,15 @@ def get_section_type_from_room(room: str) -> str:
     elif "(ป)" in room_str:
         return "L"
     return "T"
+
+# v2: อ่าน type จากคอลัมน์ section_type ก่อน ถ้า NULL/ว่างค่อย fallback parse จาก room
+# ใช้ได้กับ ClassSection และ row object ใดๆ ที่มี .section_type/.room
+def section_type_of(sec) -> str:
+    col = (getattr(sec, "section_type", None) or "").strip() if sec is not None else ""
+    if col in ("T", "L"):
+        return col
+    return get_section_type_from_room(getattr(sec, "room", "") or "" if sec is not None else "")
+
 
 # ฟังก์ชันนี้จะเช็คว่าในแผนการเรียนที่ส่งมา มีเวลาเรียนชนกันเองหรือไม่ โดยจะเช็คจากวันและเวลาที่เรียน
 def is_conflict(plan: list) -> bool:
@@ -134,7 +150,7 @@ def check_conflict_with_all(new_slots, student_id, db: Session):
             ClassSection.course_id == e.course_id, 
             ClassSection.section_number == extract_section_int(e.section_number)
         ).all()
-        e_slots = [s for s in e_secs if get_section_type_from_room(s.room or "") == (e.section_type or "T")]
+        e_slots = [s for s in e_secs if section_type_of(s) == (e.section_type or "T")]
         if is_conflict(new_slots + e_slots):
             return f"{e.course_id} ในตารางเรียน"
     cart = db.query(EnrollmentCart).filter(EnrollmentCart.student_id == student_id).all()
@@ -143,7 +159,7 @@ def check_conflict_with_all(new_slots, student_id, db: Session):
             ClassSection.course_id == c.course_id, 
             ClassSection.section_number == extract_section_int(c.section_number)
         ).all()
-        c_slots = [s for s in c_secs if get_section_type_from_room(s.room or "") == (c.section_type or "T")]
+        c_slots = [s for s in c_secs if section_type_of(s) == (c.section_type or "T")]
         if is_conflict(new_slots + c_slots):
             return f"{c.course_id} ในตะกร้าเรียน"
     return None
@@ -155,7 +171,7 @@ def format_plan(plan: list) -> list:
         raw_day = s.day_of_week.strip() if s.day_of_week else "Mon"
         start_float = s.start_time.hour + (s.start_time.minute / 60.0) if s.start_time else 0
         end_float = s.end_time.hour + (s.end_time.minute / 60.0) if s.end_time else 0
-        sec_type = get_section_type_from_room(s.room or "")
+        sec_type = section_type_of(s)
         formatted.append({
             "course_code": s.course_id,
             "section_number": str(s.section_number),
@@ -450,7 +466,7 @@ def get_z_course_options(student_id: str, z_course_code: str, db: Session = Depe
         for sec in sections:
             sec_list.append({
                 "section_number": str(sec.section_number),
-                "type": get_section_type_from_room(sec.room),
+                "type": section_type_of(sec),
                 "day_of_week": sec.day_of_week,
                 "start_time": str(sec.start_time) if sec.start_time else "",
                 "end_time": str(sec.end_time) if sec.end_time else "",
@@ -486,7 +502,7 @@ def ai_suggest(data: dict, db: Session = Depends(get_db)):
             ClassSection.section_number == extract_section_int(en.section_number)
         ).all()
         for s in secs:
-            if get_section_type_from_room(s.room or "") == (en.section_type or "T"):
+            if section_type_of(s) == (en.section_type or "T"):
                 current_slots.append(s)
     all_course_options = []
     for code in course_codes:
@@ -494,7 +510,7 @@ def ai_suggest(data: dict, db: Session = Depends(get_db)):
         if not secs: continue
         groups = {}
         for s in secs:
-            stype = get_section_type_from_room(s.room)
+            stype = section_type_of(s)
             key = (s.section_number, stype)
             if key not in groups: groups[key] = []
             groups[key].append(s)
@@ -524,6 +540,7 @@ def ai_suggest(data: dict, db: Session = Depends(get_db)):
 # ฟังก์ชันนี้จะช่วยเพิ่มวิชาลงในตะกร้าของนักศึกษา โดยรับข้อมูลรหัสนักศึกษา รหัสวิชา หมายเลขกลุ่มเรียน และประเภทกลุ่มเรียน (ทฤษฎีหรือปฏิบัติ) แล้วจะเช็คว่าระบบเปิดรับการลงทะเบียนอยู่หรือไม่ ถ้าไม่เปิด จะส่ง error 400 กลับไป ถ้าเปิด จะเช็คว่ากลุ่มเรียนนี้มีอยู่จริงในระบบไหม ถ้าไม่มี จะถือว่าเป็นกลุ่มทฤษฎีโดยดีฟอลต์ แล้วจะเช็คว่านักศึกษาคนนี้ได้ลงทะเบียนวิชานี้ไปแล้วหรือยัง ถ้าลงทะเบียนไปแล้ว จะส่ง error 400 กลับไปพร้อมกับข้อความว่า ลงทะเบียนวิชานี้ไปแล้ว ถ้ายังไม่ลงทะเบียน จะเช็คว่าวิชานี้มีอยู่ในตะกร้าแล้วหรือยัง ถ้ามีแล้ว จะส่ง error 400 กลับไปพร้อมกับข้อความว่า วิชานี้มีอยู่ในตะกร้าแล้ว ถ้ายังไม่มี จะเพิ่มวิชานี้ลงในตะกร้า และส่งข้อความยืนยันกลับไป
 @app.post("/cart/add")
 def add_to_cart(request: CartRequest, db: Session = Depends(get_db)):
+    assert_writable(db)
     sec_num_str = request.section_number
     sec_int = extract_section_int(sec_num_str)
     section_type = request.section_type
@@ -532,7 +549,7 @@ def add_to_cart(request: CartRequest, db: Session = Depends(get_db)):
             ClassSection.course_id == request.course_code,
             ClassSection.section_number == sec_int,
         ).first()
-        if sec_row: section_type = get_section_type_from_room(sec_row.room or "")
+        if sec_row: section_type = section_type_of(sec_row)
     if not section_type: section_type = "T"
     already_enrolled = db.query(Enrollment).filter(
         Enrollment.student_id == request.student_id,
@@ -581,7 +598,7 @@ def view_cart(student_id: str, db: Session = Depends(get_db)):
         added_schedule = False
         if sec_int is not None:
             for r in section_map.get((item.course_id, sec_int), []):
-                if get_section_type_from_room(r.room or "") != (item.section_type or "T"): continue
+                if section_type_of(r) != (item.section_type or "T"): continue
                 result.append({
                     "course_name": course.course_name,
                     "course_code": item.course_id,
@@ -608,10 +625,11 @@ def view_cart(student_id: str, db: Session = Depends(get_db)):
 # ฟังก์ชันนี้จะช่วยเพิ่มหลายๆ วิชาเข้าไปในตะกร้าพร้อมกัน โดยรับข้อมูลรหัสนักศึกษา และรายการวิชาที่ต้องการเพิ่ม (รหัสวิชา หมายเลขกลุ่มเรียน และประเภทกลุ่มเรียน) แล้วจะเช็คว่าระบบเปิดรับการลงทะเบียนอยู่หรือไม่ ถ้าไม่เปิด จะส่ง error 400 กลับไป ถ้าเปิด จะเช็คว่ากลุ่มเรียนแต่ละวิชาที่ต้องการเพิ่มมีอยู่จริงในระบบไหม ถ้าไม่มี จะถือว่าเป็นกลุ่มทฤษฎีโดยดีฟอลต์ แล้วจะเช็คว่านักศึกษาคนนี้ได้ลงทะเบียนวิชานั้นๆ ไปแล้วหรือยัง ถ้าลงทะเบียนไปแล้ว จะส่ง error 400 กลับไปพร้อมกับข้อความว่า ลงทะเบียนวิชานี้ไปแล้ว ถ้ายังไม่ลงทะเบียน จะเช็คว่าวิชานี้มีอยู่ในตะกร้าแล้วหรือยัง ถ้ามีแล้ว จะส่ง error 400 กลับไปพร้อมกับข้อความว่า วิชานี้มีอยู่ในตะกร้าแล้ว ถ้ายังไม่มี จะเพิ่มวิชานี้ลงในตะกร้า และส่งข้อความยืนยันกลับไป แต่ถ้ามีวิชาไหนที่มีเวลาเรียนชนกันระหว่างกันเอง หรือชนกับวิชาที่อยู่ในตารางเรียนปัจจุบันของนักศึกษา จะส่ง error 400 กลับไปพร้อมกับรายละเอียดว่าชนกับวิชาไหน วันไหน เวลาไหน และแนะนำกลุ่มเรียนอื่นที่ไม่มีเวลาชนกันให้ถ้ามี
 @app.post("/cart/batch_add_with_check")
 def batch_add_cart(req: BatchCartRequest, db: Session = Depends(get_db)):
+    assert_writable(db)
     cart_items = db.query(EnrollmentCart).filter(EnrollmentCart.student_id == req.student_id).all()
     def get_time_slots(course_code, sec_num, sec_type):
         slots = db.query(ClassSection).filter(ClassSection.course_id == course_code, ClassSection.section_number == extract_section_int(sec_num)).all()
-        return [s for s in slots if get_section_type_from_room(s.room or "") == sec_type]
+        return [s for s in slots if section_type_of(s) == sec_type]
     current_schedule = []
     for ci in cart_items: current_schedule.extend(get_time_slots(ci.course_id, ci.section_number, ci.section_type or "T"))
     conflicts = []
@@ -629,7 +647,7 @@ def batch_add_cart(req: BatchCartRequest, db: Session = Depends(get_db)):
             if is_conf: break
         if is_conf:
             all_secs = db.query(ClassSection).filter(ClassSection.course_id == req_item.course_code).all()
-            valid_secs = [s for s in all_secs if get_section_type_from_room(s.room or "") == req_item.section_type]
+            valid_secs = [s for s in all_secs if section_type_of(s) == req_item.section_type]
             sec_nums = list(set([str(s.section_number) for s in valid_secs]))
             alt_sec = None
             for sn in sec_nums:
@@ -659,6 +677,7 @@ def batch_add_cart(req: BatchCartRequest, db: Session = Depends(get_db)):
 # ฟังก์ชันนี้จะช่วยลบวิชาออกจากตะกร้าของนักศึกษา โดยรับข้อมูลรหัสนักศึกษา รหัสวิชา และประเภทกลุ่มเรียน (ถ้ามี) แล้วจะเช็คว่ามีวิชานี้อยู่ในตะกร้าของนักศึกษาคนนี้ไหม ถ้ามี จะลบออกจากตะกร้าและส่งข้อความยืนยันกลับไป ถ้าไม่มี จะส่ง error 404 กลับไปพร้อมกับข้อความว่า ไม่พบวิชานี้ในตะกร้า
 @app.post("/cart/remove")
 def post_remove_from_cart(request: RemoveCartRequest, db: Session = Depends(get_db)):
+    assert_writable(db)
     query = db.query(EnrollmentCart).filter(EnrollmentCart.student_id == request.student_id, EnrollmentCart.course_id == request.course_code)
     if request.section_type: query = query.filter(EnrollmentCart.section_type == request.section_type)
     item = query.first()
@@ -671,6 +690,7 @@ def post_remove_from_cart(request: RemoveCartRequest, db: Session = Depends(get_
 # ฟังก์ชันนี้จะช่วยลบวิชาออกจากตะกร้าของนักศึกษา โดยรับข้อมูลรหัสนักศึกษา รหัสวิชา และประเภทกลุ่มเรียน (ถ้ามี) ผ่าน URL parameter แล้วจะเช็คว่ามีวิชานี้อยู่ในตะกร้าของนักศึกษาคนนี้ไหม ถ้ามี จะลบออกจากตะกร้าและส่งข้อความยืนยันกลับไป ถ้าไม่มี จะส่ง error 404 กลับไปพร้อมกับข้อความว่า ไม่พบวิชานี้ในตะกร้า
 @app.delete("/cart/remove/{student_id}/{course_code}")
 def delete_remove_from_cart(student_id: str, course_code: str, section_type: Optional[str] = None, db: Session = Depends(get_db)):
+    assert_writable(db)
     query = db.query(EnrollmentCart).filter(EnrollmentCart.student_id == student_id, EnrollmentCart.course_id == course_code)
     if section_type: query = query.filter(EnrollmentCart.section_type == section_type)
     deleted_count = query.delete()
@@ -681,6 +701,7 @@ def delete_remove_from_cart(student_id: str, course_code: str, section_type: Opt
 # ฟังก์ชันนี้จะช่วยยืนยันการลงทะเบียนวิชาที่อยู่ในตะกร้าของนักศึกษา โดยรับข้อมูลรหัสนักศึกษา ผ่าน URL parameter แล้วจะเช็คว่าระบบเปิดรับการลงทะเบียนอยู่หรือไม่ ถ้าไม่เปิด จะส่ง error 400 กลับไป ถ้าเปิด จะดึงรายการวิชาที่อยู่ในตะกร้าของนักศึกษาคนนี้มาเช็คกับฐานข้อมูลว่านักศึกษาคนนี้ได้ลงทะเบียนวิชานั้นๆ ไปแล้วหรือยัง ถ้าลงทะเบียนไปแล้ว จะข้ามวิชานั้นไป ถ้ายังไม่ลงทะเบียน จะเช็คว่าวิชานั้นๆ มีที่นั่งว่างไหม ถ้ามีที่นั่งว่าง จะเพิ่มการลงทะเบียนในตาราง Enrollment และอัพเดตจำนวนที่นั่งที่ลงทะเบียนในตาราง ClassSection ถ้าไม่มีที่นั่งว่าง จะส่ง error 400 กลับไปพร้อมกับข้อความว่า วิชานี้ที่นั่งเต็มแล้ว หลังจากทำการยืนยันการลงทะเบียนเสร็จแล้ว จะลบรายการวิชาในตะกร้าของนักศึกษาคนนี้ออกทั้งหมด และส่งข้อความยืนยันกลับไปว่า ลงทะเบียนสำเร็จ
 @app.post("/cart/confirm/{student_id}")
 def confirm_enrollment(student_id: str, db: Session = Depends(get_db)):
+    assert_writable(db)
     if not is_regis_open(db): raise HTTPException(status_code=400, detail="ขณะนี้ระบบปิดรับการลงทะเบียนชั่วคราว")
     cart_items = db.query(EnrollmentCart).filter(EnrollmentCart.student_id == student_id).all()
     if not cart_items: raise HTTPException(status_code=400, detail="ตะกร้าว่างเปล่า")
@@ -696,7 +717,7 @@ def confirm_enrollment(student_id: str, db: Session = Depends(get_db)):
             done_ids.append(item.cart_id)
             continue
         sections = db.query(ClassSection).with_for_update().filter(ClassSection.course_id == item.course_id, ClassSection.section_number == extract_section_int(item.section_number)).all()
-        target_section = next((s for s in sections if get_section_type_from_room(s.room or "") == item.section_type), None)
+        target_section = next((s for s in sections if section_type_of(s) == item.section_type), None)
         if not target_section and sections: target_section = sections[0]
         if not target_section:
             failed.append({**ref, "reason": "ไม่พบกลุ่มเรียนนี้ในระบบ"})
@@ -730,6 +751,7 @@ def confirm_enrollment(student_id: str, db: Session = Depends(get_db)):
 # ฟังก์ชันนี้จะช่วยให้ผู้ใช้สามารถสร้างกลุ่มเรียนได้ โดยรับข้อมูลรหัสนักศึกษา ผ่าน URL parameter แล้วจะเช็คว่านักศึกษาคนนี้มีอยู่ในระบบไหม ถ้าไม่มี จะส่ง error 404 กลับไป ถ้ามี จะเช็คว่านักศึกษาคนนี้มีกลุ่มเรียนอยู่แล้วหรือยัง ถ้ามีแล้ว จะส่ง error 400 กลับไปพร้อมกับข้อความว่า คุณมีกลุ่มอยู่แล้ว ถ้ายังไม่มี จะสร้างกลุ่มเรียนใหม่ขึ้นมา โดยกำหนดให้นักศึกษาคนนี้เป็นหัวหน้ากลุ่ม และสร้างรหัสกลุ่มแบบสุ่มที่ไม่ซ้ำกับกลุ่มอื่นๆ ในระบบ แล้วจะเพิ่มข้อมูลกลุ่มเรียนลงในตาราง StudyGroup และเพิ่มข้อมูลสมาชิกกลุ่มลงในตาราง GroupMember โดยกำหนดสถานะของสมาชิกคนนี้เป็น "APPROVED" หลังจากสร้างกลุ่มเรียนเสร็จแล้ว จะส่งข้อความยืนยันกลับไปพร้อมกับรหัสกลุ่มที่สร้างขึ้นมา
 @app.post("/group/create/{student_id}")
 def create_group(student_id: str, db: Session = Depends(get_db)):
+    assert_writable(db)
     existing = db.query(GroupMember).filter(GroupMember.student_id == student_id).first()
     if existing: raise HTTPException(status_code=400, detail="คุณมีกลุ่มอยู่แล้ว")
     new_code = generate_random_code()
@@ -742,6 +764,7 @@ def create_group(student_id: str, db: Session = Depends(get_db)):
 # ฟังก์ชันนี้จะช่วยให้ผู้ใช้สามารถเข้าร่วมกลุ่มเรียนได้ โดยรับข้อมูลรหัสนักศึกษา และรหัสกลุ่ม ผ่าน URL parameter แล้วจะเช็คว่ามีกลุ่มที่มีรหัสกลุ่มนี้อยู่ในระบบไหม ถ้าไม่มี จะส่ง error 404 กลับไปพร้อมกับข้อความว่า รหัสกลุ่มไม่ถูกต้อง ถ้ามีกลุ่มนี้อยู่ จะเช็คว่านักศึกษาคนนี้มีกลุ่มเรียนอยู่แล้วหรือยัง ถ้ามีแล้ว จะส่ง error 400 กลับไปพร้อมกับข้อความว่า คุณอยู่ในกลุ่มอื่นแล้ว ถ้ายังไม่มี จะเช็คว่าจำนวนสมาชิกที่ได้รับการอนุมัติในกลุ่มนี้มีมากกว่า 5 คนหรือยัง ถ้ามีแล้ว จะส่ง error 400 กลับไปพร้อมกับข้อความว่า กลุ่มเต็มแล้ว ถ้ายังไม่เต็ม จะเช็คว่านักศึกษาคนนี้อยู่คณะ สาขา และชั้นปีเดียวกันกับหัวหน้ากลุ่มไหม ถ้าไม่ใช่ จะส่ง error 400 กลับไปพร้อมกับข้อความว่า ต้องอยู่คณะ สาขา และชั้นปีเดียวกัน ถ้าใช่ จะเพิ่มข้อมูลสมาชิกคนนี้ลงในตาราง GroupMember โดยกำหนดสถานะของสมาชิกคนนี้เป็น "PENDING" หลังจากส่งคำขอเข้าร่วมกลุ่มแล้ว จะส่งข้อความยืนยันกลับไปว่า ส่งคำขอแล้ว
 @app.post("/group/join/{student_id}/{group_code}")
 def join_group(student_id: str, group_code: str, db: Session = Depends(get_db)):
+    assert_writable(db)
     group = db.query(StudyGroup).filter(StudyGroup.group_code == group_code).first()
     if not group: raise HTTPException(status_code=404, detail="รหัสกลุ่มไม่ถูกต้อง")
     exist = db.query(GroupMember).filter(GroupMember.student_id == student_id).first()
@@ -766,7 +789,7 @@ def get_my_group(student_id: str, db: Session = Depends(get_db)):
     raw_cart = db.query(EnrollmentCart, Course, ClassSection).join(Course, EnrollmentCart.course_id == Course.course_id).outerjoin(ClassSection, (EnrollmentCart.course_id == ClassSection.course_id) & (EnrollmentCart.section_number == ClassSection.section_number)).filter(EnrollmentCart.student_id == group.leader_id).all()
     processed_cart = {}
     for ec, c, cs in raw_cart:
-        current_sec_type = get_section_type_from_room(cs.room or "") if cs else "-"
+        current_sec_type = section_type_of(cs) if cs else "-"
         if ec.section_type and current_sec_type != ec.section_type: continue
         cart_key = (ec.course_id, ec.section_number, ec.section_type)
         if cart_key not in processed_cart:
@@ -785,6 +808,7 @@ def get_my_group(student_id: str, db: Session = Depends(get_db)):
 # ฟังก์ชันนี้จะช่วยให้สมาชิกในกลุ่มสามารถสลับสถานะพร้อมสำหรับการลงทะเบียนแบบกลุ่มได้ โดยรับข้อมูลรหัสนักศึกษา ผ่าน URL parameter แล้วจะเช็คว่านักศึกษาคนนี้มีอยู่ในระบบไหม ถ้าไม่มี จะส่ง error 404 กลับไป ถ้ามี จะเช็คว่านักศึกษาคนนี้มีกลุ่มเรียนอยู่ไหม ถ้าไม่มี จะส่ง error 404 กลับไป ถ้ามีกลุ่มเรียน จะสลับสถานะ is_ready ของสมาชิกคนนี้ในตาราง GroupMember และอัพเดต last_synced_at ของกลุ่มในตาราง StudyGroup เป็นเวลาปัจจุบัน เพื่อให้หัวหน้ากลุ่มและสมาชิกคนอื่นๆ รู้ว่ามีสมาชิกคนไหนพร้อมหรือยังสำหรับการลงทะเบียนแบบกลุ่ม หลังจากสลับสถานะแล้ว จะส่งข้อความยืนยันกลับไปพร้อมกับสถานะ is_ready ปัจจุบันของสมาชิกคนนี้
 @app.post("/group/ready/{student_id}")
 def toggle_ready(student_id: str, db: Session = Depends(get_db)):
+    assert_writable(db)
     member = db.query(GroupMember).filter(GroupMember.student_id == student_id).first()
     if not member: raise HTTPException(status_code=404, detail="ไม่พบสมาชิก")
     member.is_ready = not member.is_ready
@@ -796,6 +820,7 @@ def toggle_ready(student_id: str, db: Session = Depends(get_db)):
 # ฟังก์ชันนี้จะช่วยให้หัวหน้ากลุ่มสามารถลงทะเบียนวิชาทั้งหมดในตะกร้าของตัวเองให้กับสมาชิกที่ได้รับการอนุมัติในกลุ่มได้ โดยรับข้อมูลรหัสนักศึกษา ผ่าน URL parameter แล้วจะเช็คว่าระบบเปิดรับการลงทะเบียนอยู่หรือไม่ ถ้าไม่เปิด จะส่ง error 400 กลับไป ถ้าเปิด จะเช็คว่ากลุ่มเรียนของหัวหน้าคนนี้มีอยู่ไหม ถ้าไม่มี จะส่ง error 404 กลับไป ถ้ามีกลุ่มเรียน จะดึงรายการสมาชิกที่ได้รับการอนุมัติในกลุ่มนี้มาเช็คว่าสมาชิกทุกคนพร้อมสำหรับการลงทะเบียนแบบกลุ่มไหม ถ้ามีสมาชิกคนไหนที่ยังไม่พร้อม จะส่ง error 400 กลับไปพร้อมกับข้อความว่า สมาชิกยังไม่พร้อม และระบุรหัสนักศึกษาของสมาชิกคนนั้นๆ ถ้าสมาชิกทุกคนพร้อมแล้ว จะดึงรายการวิชาที่อยู่ในตะกร้าของหัวหน้ามาเช็คกับฐานข้อมูลว่านักศึกษาคนนี้ได้ลงทะเบียนวิชานั้นๆ ไปแล้วหรือยัง ถ้าลงทะเบียนไปแล้ว จะข้ามวิชานั้นไป ถ้ายังไม่ลงทะเบียน จะเช็คว่าวิชานั้นๆ มีที่นั่งว่างไหม ถ้ามีที่นั่งว่าง จะเพิ่มการลงทะเบียนในตาราง Enrollment และอัพเดตจำนวนที่นั่งที่ลงทะเบียนในตาราง ClassSection สำหรับสมาชิกแต่ละคน ถ้าไม่มีที่นั่งว่าง จะส่ง error 400 กลับไปพร้อมกับข้อความว่า วิชานี้ที่นั่งเต็มแล้ว และระบุรหัสวิชาและหมายเลขกลุ่มเรียน หลังจากทำการลงทะเบียนเสร็จแล้ว จะอัพเดตสถานะ is_registered ของกลุ่มเป็น True และ last_action เป็น "REGISTERED" ในตาราง StudyGroup เพื่อให้สมาชิกในกลุ่มรู้ว่ากลุ่มนี้ได้ทำการลงทะเบียนเรียบร้อยแล้ว และส่งข้อความยืนยันกลับไปว่า ลงทะเบียนให้สมาชิกทุกคนสำเร็จ
 @app.post("/group/register-all/{leader_id}")
 def register_group_all(leader_id: str, db: Session = Depends(get_db)):
+    assert_writable(db)
     if not is_regis_open(db): raise HTTPException(status_code=400, detail="ขณะนี้ระบบปิดรับการลงทะเบียนชั่วคราว")
     group = db.query(StudyGroup).filter(StudyGroup.leader_id == leader_id).first()
     if not group: raise HTTPException(status_code=404, detail="ไม่พบกลุ่ม")
@@ -808,9 +833,10 @@ def register_group_all(leader_id: str, db: Session = Depends(get_db)):
         for item in leader_cart:
             exist = db.query(Enrollment).filter(Enrollment.student_id == member.student_id, Enrollment.course_id == item.course_id, Enrollment.section_type == item.section_type).first()
             if not exist:
-                sections = db.query(ClassSection).filter(ClassSection.course_id == item.course_id, ClassSection.section_number == extract_section_int(item.section_number)).all()
+                # v2: lock แถว section กัน 2 กลุ่มกดพร้อมกันแล้วที่นั่งเกิน
+                sections = db.query(ClassSection).with_for_update().filter(ClassSection.course_id == item.course_id, ClassSection.section_number == extract_section_int(item.section_number)).all()
                 for s in sections:
-                    if get_section_type_from_room(s.room or "") == item.section_type:
+                    if section_type_of(s) == item.section_type:
                         if s.max_seats and s.enrolled_seats >= s.max_seats: raise HTTPException(status_code=400, detail=f"วิชา {item.course_id} ที่นั่งเต็มแล้ว")
                         s.enrolled_seats += 1; break
                 db.add(Enrollment(student_id=member.student_id, course_id=item.course_id, section_number=item.section_number, section_type=item.section_type))
@@ -821,6 +847,7 @@ def register_group_all(leader_id: str, db: Session = Depends(get_db)):
 # ฟังก์ชันนี้จะช่วยให้หัวหน้ากลุ่มสามารถซิงค์ตะกร้าของตัวเองให้กับสมาชิกที่ได้รับการอนุมัติในกลุ่มได้ โดยรับข้อมูลรหัสนักศึกษา ผ่าน URL parameter แล้วจะเช็คว่าระบบเปิดรับการลงทะเบียนอยู่หรือไม่ ถ้าไม่เปิด จะส่ง error 400 กลับไป ถ้าเปิด จะเช็คว่ากลุ่มเรียนของหัวหน้าคนนี้มีอยู่ไหม ถ้าไม่มี จะส่ง error 404 กลับไป ถ้ามีกลุ่มเรียน จะดึงรายการสมาชิกที่ได้รับการอนุมัติในกลุ่มนี้มาเช็คว่าสมาชิกทุกคนพร้อมสำหรับการลงทะเบียนแบบกลุ่มไหม ถ้ามีสมาชิกคนไหนที่ยังไม่พร้อม จะส่ง error 400 กลับไปพร้อมกับข้อความว่า สมาชิกยังไม่พร้อม และระบุรหัสนักศึกษาของสมาชิกคนนั้นๆ ถ้าสมาชิกทุกคนพร้อมแล้ว จะดึงรายการวิชาที่อยู่ในตะกร้าของหัวหน้ามาเช็คกับฐานข้อมูลว่านักศึกษาคนนี้ได้ลงทะเบียนวิชานั้นๆ ไปแล้วหรือยัง ถ้าลงทะเบียนไปแล้ว จะข้ามวิชานั้นไป ถ้ายังไม่ลงทะเบียน จะเช็คว่าวิชานั้นๆ มีที่นั่งว่างไหม ถ้ามีที่นั่งว่าง จะเพิ่มรายการวิชาในตะกร้าของสมาชิกแต่ละคน ถ้าไม่มีที่นั่งว่าง จะส่ง error 400 กลับไปพร้อมกับข้อความว่า วิชานี้ที่นั่งเต็มแล้ว และระบุรหัสวิชาและหมายเลขกลุ่มเรียน หลังจากทำการซิงค์ตะกร้าเสร็จแล้ว จะอัพเดต last_synced_at ของกลุ่มในตาราง StudyGroup เป็นเวลาปัจจุบัน และ last_action เป็น "SYNC" เพื่อให้สมาชิกในกลุ่มรู้ว่ากลุ่มนี้ได้ทำการซิงค์ตะกร้าเรียบร้อยแล้ว และส่งข้อความยืนยันกลับไปว่า ซิงค์ตะกร้าให้สมาชิกสำเร็จ
 @app.post("/group/sync/{leader_id}")
 def sync_group_cart(leader_id: str, db: Session = Depends(get_db)):
+    assert_writable(db)
     group = db.query(StudyGroup).filter(StudyGroup.leader_id == leader_id).first()
     if not group: raise HTTPException(status_code=403, detail="ไม่มีสิทธิ์ Sync")
     leader_cart = db.query(EnrollmentCart).filter(EnrollmentCart.student_id == leader_id).all()
@@ -829,7 +856,7 @@ def sync_group_cart(leader_id: str, db: Session = Depends(get_db)):
     leader_slots = []
     for item in leader_cart:
         slots = db.query(ClassSection).filter(ClassSection.course_id == item.course_id, ClassSection.section_number == extract_section_int(item.section_number)).all()
-        leader_slots.extend([s for s in slots if get_section_type_from_room(s.room or "") == (item.section_type or "T")])
+        leader_slots.extend([s for s in slots if section_type_of(s) == (item.section_type or "T")])
     for member in approved_members:
         if member.student_id == leader_id: continue
         member_enrolls = db.query(Enrollment).filter(Enrollment.student_id == member.student_id).all()
@@ -841,7 +868,7 @@ def sync_group_cart(leader_id: str, db: Session = Depends(get_db)):
             for me in member_enrolls:
                 me_secs = db.query(ClassSection).filter(ClassSection.course_id == me.course_id, ClassSection.section_number == extract_section_int(me.section_number)).all()
                 for mes in me_secs:
-                    if get_section_type_from_room(mes.room or "") != (me.section_type or "T"): continue
+                    if section_type_of(mes) != (me.section_type or "T"): continue
                     if ls.day_of_week == mes.day_of_week and max(ls.start_time, mes.start_time) < min(ls.end_time, mes.end_time):
                         raise HTTPException(status_code=400, detail=f"วิชา {ls.course_id} ของหัวหน้า ชนกับ {me.course_id} ของสมาชิก {member.student_id}")
         db.query(EnrollmentCart).filter(EnrollmentCart.student_id == member.student_id).delete()
@@ -853,6 +880,7 @@ def sync_group_cart(leader_id: str, db: Session = Depends(get_db)):
 # ฟังก์ชันนี้จะช่วยให้หัวหน้ากลุ่มสามารถอนุมัติหรือปฏิเสธคำขอเข้าร่วมกลุ่มของสมาชิกที่มีสถานะเป็น "PENDING" ได้ โดยรับข้อมูลรหัสนักศึกษา หัวหน้ากลุ่ม รหัสนักศึกษาของสมาชิกที่ต้องการอนุมัติหรือปฏิเสธ และ action ว่าต้องการอนุมัติ ("APPROVE") หรือปฏิเสธ ("REJECT") ผ่าน URL parameter แล้วจะเช็คว่ากลุ่มเรียนของหัวหน้าคนนี้มีอยู่ไหม ถ้าไม่มี จะส่ง error 404 กลับไป ถ้ามีกลุ่มเรียน จะเช็คว่าสมาชิกที่ต้องการอนุมัติหรือปฏิเสธมีอยู่ในกลุ่มนี้ไหม และมีสถานะเป็น "PENDING" อยู่ไหม ถ้าไม่ใช่ จะส่ง error 404 กลับไป ถ้าใช่ จะทำการอัพเดตสถานะของสมาชิกคนนี้ในตาราง GroupMember เป็น "APPROVED" ถ้า action เป็น "APPROVE" หรือจะลบข้อมูลสมาชิกคนนี้ออกจากตาราง GroupMember ถ้า action เป็น "REJECT" หลังจากดำเนินการอนุมัติหรือปฏิเสธเสร็จแล้ว จะส่งข้อความยืนยันกลับไปว่า ดำเนินการสำเร็จ
 @app.post("/group/approve/{leader_id}/{target_id}/{action}")
 def approve_member(leader_id: str, target_id: str, action: str, db: Session = Depends(get_db)):
+    assert_writable(db)
     group = db.query(StudyGroup).filter(StudyGroup.leader_id == leader_id).first()
     if not group: raise HTTPException(status_code=403, detail="คุณไม่ใช่หัวหน้ากลุ่ม")
     target = db.query(GroupMember).filter(GroupMember.group_id == group.group_id, GroupMember.student_id == target_id).first()
@@ -868,6 +896,7 @@ def approve_member(leader_id: str, target_id: str, action: str, db: Session = De
 # ฟังก์ชันนี้จะช่วยให้สมาชิกในกลุ่มสามารถออกจากกลุ่มเรียนได้ โดยรับข้อมูลรหัสนักศึกษา ผ่าน URL parameter แล้วจะเช็คว่ากลุ่มเรียนของสมาชิกคนนี้มีอยู่ไหม ถ้าไม่มี จะส่ง error 404 กลับไป ถ้ามีกลุ่มเรียน จะลบข้อมูลสมาชิกคนนี้ออกจากตาราง GroupMember และถ้าสมาชิกคนนี้เป็นหัวหน้ากลุ่ม จะทำการยุบกลุ่มโดยการลบข้อมูลกลุ่มนั้นออกจากตาราง StudyGroup หลังจากดำเนินการออกจากกลุ่มเสร็จแล้ว จะส่งข้อความยืนยันกลับไปว่า ออกจากกลุ่มสำเร็จ
 @app.delete("/group/leave/{student_id}")
 def leave_group(student_id: str, db: Session = Depends(get_db)):
+    assert_writable(db)
     member = db.query(GroupMember).filter(GroupMember.student_id == student_id).first()
     if not member: raise HTTPException(status_code=404, detail="ไม่ได้อยู่ในกลุ่ม")
     db.delete(member); db.commit()
@@ -876,6 +905,7 @@ def leave_group(student_id: str, db: Session = Depends(get_db)):
 # ฟังก์ชันนี้จะช่วยให้หัวหน้ากลุ่มสามารถยุบกลุ่มเรียนได้ โดยรับข้อมูลรหัสนักศึกษา ผ่าน URL parameter แล้วจะเช็คว่ากลุ่มเรียนของหัวหน้าคนนี้มีอยู่ไหม ถ้าไม่มี จะส่ง error 404 กลับไป ถ้ามีกลุ่มเรียน จะลบข้อมูลกลุ่มนั้นออกจากตาราง StudyGroup ซึ่งจะทำให้สมาชิกทุกคนในกลุ่มนี้ถูกลบออกจากกลุ่มด้วย หลังจากดำเนินการยุบกลุ่มเสร็จแล้ว จะส่งข้อความยืนยันกลับไปว่า ยุบกลุ่มสำเร็จ
 @app.delete("/group/delete/{leader_id}")
 def delete_group(leader_id: str, db: Session = Depends(get_db)):
+    assert_writable(db)
     group = db.query(StudyGroup).filter(StudyGroup.leader_id == leader_id).first()
     if not group: raise HTTPException(status_code=403, detail="ไม่ใช่หัวหน้ากลุ่ม")
     db.delete(group); db.commit()
@@ -884,6 +914,7 @@ def delete_group(leader_id: str, db: Session = Depends(get_db)):
 # ฟังก์ชันนี้จะช่วยให้สมาชิกในกลุ่มสามารถบันทึกการรับทราบว่าตัวเองเห็นการแจ้งเตือนเกี่ยวกับการลงทะเบียนแบบกลุ่มแล้วได้ โดยรับข้อมูลรหัสนักศึกษา ผ่าน URL parameter แล้วจะเช็คว่ากลุ่มเรียนของสมาชิกคนนี้มีอยู่ไหม ถ้าไม่มี จะส่ง error 404 กลับไป ถ้ามีกลุ่มเรียน จะอัพเดตสถานะ has_seen_registered_alert ของสมาชิกคนนี้ในตาราง GroupMember เป็น True เพื่อให้ระบบรู้ว่าสมาชิกคนนี้ได้รับทราบเกี่ยวกับการลงทะเบียนแบบกลุ่มแล้ว หลังจากบันทึกการรับทราบเสร็จแล้ว จะส่งข้อความยืนยันกลับไปว่า บันทึกการรับทราบสำเร็จ
 @app.post("/group/mark-seen-registered/{student_id}")
 def mark_seen_registered(student_id: str, db: Session = Depends(get_db)):
+    assert_writable(db)
     member = db.query(GroupMember).filter(GroupMember.student_id == student_id).first()
     if not member: raise HTTPException(status_code=404, detail="ไม่พบสมาชิก")
     member.has_seen_registered_alert = True; db.commit()
@@ -900,7 +931,7 @@ def get_my_schedule(student_id: str, db: Session = Depends(get_db)):
         if not course: continue
         secs = db.query(ClassSection).filter(ClassSection.course_id == en.course_id, ClassSection.section_number == extract_section_int(en.section_number)).all()
         for sec in secs:
-            stype = get_section_type_from_room(sec.room or "")
+            stype = section_type_of(sec)
             if en.section_type and stype != en.section_type: continue
             result.append({
                 "course_code": course.course_id, "course_name": course.course_name, "credits": course.credits, "section_number": sec.section_number,
@@ -912,6 +943,7 @@ def get_my_schedule(student_id: str, db: Session = Depends(get_db)):
 # ฟังก์ชันนี้จะช่วยให้นักศึกษาสามารถถอนวิชาที่ลงทะเบียนอยู่ได้ โดยรับข้อมูลรหัสนักศึกษา รหัสวิชา หมายเลขกลุ่ม และประเภทกลุ่ม ผ่าน JSON body แล้วจะเช็คว่าการลงทะเบียนของนักศึกษาคนนี้ในวิชาและกลุ่มเรียนนี้มีอยู่ไหม ถ้าไม่มี จะส่ง error 404 กลับไป ถ้ามี จะลบข้อมูลการลงทะเบียนนั้นออกจากตาราง Enrollment และอัพเดตจำนวนที่นั่งที่ลงทะเบียนในตาราง ClassSection ให้ลดลง 1 ที่นั่ง หลังจากถอนวิชาเสร็จแล้ว จะเช็คว่ามีคนที่อยู่ในคิวรอเข้าวิชานี้ไหม ถ้ามี จะโอนสิทธิ์ให้กับคนที่อยู่ในคิวรอคนนั้นทันที และส่งข้อความแจ้งเตือนผ่านระบบ push notification ให้กับนักศึกษาคนนั้นด้วยว่า ถึงคิวของคุณแล้ว วิชานี้ว่างแล้ว ให้รีบยืนยันสิทธิ์ภายใน 30 นาที ถ้าไม่มีคนที่อยู่ในคิวรอ จะส่งข้อความยืนยันกลับไปว่า ถอนวิชาออกจากตารางเรียนสำเร็จ
 @app.post("/enrollment/withdraw")
 def withdraw_course(data: dict, db: Session = Depends(get_db)):
+    assert_writable(db)
     student_id, course_code, sec_num_str, sec_type = data.get("student_id"), data.get("course_code"), str(data.get("section_number")), data.get("section_type")
     enrollment = db.query(Enrollment).filter(Enrollment.student_id == student_id, Enrollment.course_id == course_code, Enrollment.section_number == sec_num_str, Enrollment.section_type == sec_type).first()
     if not enrollment: raise HTTPException(status_code=404, detail="ไม่พบข้อมูลการลงทะเบียน")
@@ -930,7 +962,7 @@ def withdraw_course(data: dict, db: Session = Depends(get_db)):
     else:
         sections = db.query(ClassSection).with_for_update().filter(ClassSection.course_id == course_code, ClassSection.section_number == sec_num_int).all()
         for sec in sections:
-            if get_section_type_from_room(sec.room or "") == sec_type and sec.enrolled_seats > 0: sec.enrolled_seats -= 1
+            if section_type_of(sec) == sec_type and sec.enrolled_seats > 0: sec.enrolled_seats -= 1
         msg = f"ถอนวิชา {course_label} สำเร็จ"
     db.commit()
     return {"status": "success", "message": msg}
@@ -946,7 +978,7 @@ def get_student_grades(student_id: str, db: Session = Depends(get_db)):
 @app.get("/sections/{course_code}")
 def get_course_sections_v1(course_code: str, db: Session = Depends(get_db)):
     sections = db.query(ClassSection).filter(ClassSection.course_id == course_code).all()
-    return [{"section_id": s.section_id, "section_number": str(s.section_number), "type": get_section_type_from_room(s.room), "day_of_week": s.day_of_week, "start_time": s.start_time.strftime('%H:%M') if s.start_time else "00:00", "end_time": s.end_time.strftime('%H:%M') if s.end_time else "00:00", "room": s.room, "max_seats": s.max_seats, "enrolled_seats": s.enrolled_seats} for s in sections]
+    return [{"section_id": s.section_id, "section_number": str(s.section_number), "type": section_type_of(s), "day_of_week": s.day_of_week, "start_time": s.start_time.strftime('%H:%M') if s.start_time else "00:00", "end_time": s.end_time.strftime('%H:%M') if s.end_time else "00:00", "room": s.room, "max_seats": s.max_seats, "enrolled_seats": s.enrolled_seats} for s in sections]
 
 # ฟังก์ชันนี้จะช่วยให้นักศึกษาสามารถดูข้อมูลกลุ่มเรียนของวิชาต่างๆ ได้ในรูปแบบที่จัดกลุ่มตามหมายเลขกลุ่มและประเภทกลุ่ม โดยรับข้อมูลรหัสวิชา ผ่าน URL parameter แล้วจะเช็คว่ามีวิชาที่มีรหัสวิชานี้อยู่ในระบบไหม ถ้าไม่มี จะส่ง error 404 กลับไป ถ้ามี จะดึงรายการกลุ่มเรียนของวิชานี้มาแสดงผล พร้อมกับข้อมูลรายละเอียดของกลุ่มเรียน เช่น หมายเลขกลุ่ม ประเภทกลุ่ม วันเรียน เวลาเรียน ห้องเรียน จำนวนที่นั่งสูงสุด และจำนวนที่นั่งที่ลงทะเบียนไปแล้ว โดยจะจัดกลุ่มเรียนที่มีหมายเลขกลุ่มและประเภทกลุ่มเดียวกันให้อยู่ใน object เดียวกัน และรวมวันเรียนที่ต่างกันไว้ใน field "day_of_week" เพื่อให้นักศึกษาสามารถตรวจสอบข้อมูลกลุ่มเรียนของวิชาต่างๆ ได้อย่างสะดวกและเข้าใจง่ายขึ้น
 @app.get("/courses/{course_id}/sections")
@@ -955,7 +987,7 @@ def get_course_sections_v2(course_id: str, db: Session = Depends(get_db)):
     if not sections: return []
     grouped = {}
     for sec in sections:
-        stype = get_section_type_from_room(sec.room)
+        stype = section_type_of(sec)
         key = (sec.section_number, stype)
         if key not in grouped: grouped[key] = {"course_id": sec.course_id, "section_number": sec.section_number, "section_type": stype, "day_of_week": sec.day_of_week or "", "start_time": str(sec.start_time) if sec.start_time else None, "end_time": str(sec.end_time) if sec.end_time else None, "max_seats": sec.max_seats, "enrolled_seats": sec.enrolled_seats}
         elif sec.day_of_week and sec.day_of_week not in grouped[key]["day_of_week"]:
@@ -966,8 +998,9 @@ def get_course_sections_v2(course_id: str, db: Session = Depends(get_db)):
 # ฟังก์ชันนี้จะช่วยให้นักศึกษาสามารถเข้าร่วมคิวรอเข้าวิชาที่เต็มได้ โดยรับข้อมูลรหัสนักศึกษา รหัสวิชา หมายเลขกลุ่ม และประเภทกลุ่ม ผ่าน JSON body แล้วจะเช็คว่ามีวิชาที่มีรหัสวิชานี้อยู่ในระบบไหม ถ้าไม่มี จะส่ง error 404 กลับไป ถ้ามี จะเช็คว่ากลุ่มเรียนที่มีหมายเลขกลุ่มและประเภทกลุ่มนี้มีอยู่ไหม ถ้าไม่มี จะส่ง error 404 กลับไป ถ้ามีกลุ่มเรียน จะเช็คว่ากลุ่มเรียนนี้เต็มแล้วหรือยัง ถ้ายังไม่เต็ม จะส่ง error 400 กลับไป เพราะยังไม่จำเป็นต้องเข้าคิวรอ ถ้ากลุ่มเรียนนี้เต็มแล้ว จะเช็คว่านักศึกษาคนนี้ได้เข้าคิวรอสำหรับวิชาและกลุ่มเรียนนี้ไว้แล้วหรือยัง ถ้าเข้าคิวรอไว้แล้ว จะส่ง error 400 กลับไป ถ้ายังไม่เข้าคิวรอ จะเช็คว่านักศึกษาคนนี้มีเวลาชนกับตารางเรียนปัจจุบันของตัวเองไหม ถ้ามีเวลาชนกัน จะส่ง error 400 กลับไปพร้อมกับข้อความบอกว่าวันและเวลาที่ชนกันคืออะไร ถ้าไม่มีเวลาชนกัน จะเพิ่มข้อมูลการเข้าคิวรอของนักศึกษาคนนี้ในตาราง Waitlist และกำหนดตำแหน่งในคิวรอให้เป็นลำดับถัดไปจากคนที่เข้าคิวรอคนสุดท้ายสำหรับวิชาและกลุ่มเรียนนี้ หลังจากเพิ่มข้อมูลการเข้าคิวรอเสร็จแล้ว จะส่งข้อความยืนยันกลับไปว่า เข้าสู่ลำดับรอสำเร็จ พร้อมกับตำแหน่งในคิวรอของนักศึกษาคนนี้
 @app.post("/waitlist/join")
 def join_waitlist(req: WaitlistJoinRequest, db: Session = Depends(get_db)):
+    assert_writable(db)
     sections = db.query(ClassSection).filter(ClassSection.course_id == req.course_code, ClassSection.section_number == req.section_number).all()
-    target_secs = [s for s in sections if get_section_type_from_room(s.room or "") == req.section_type]
+    target_secs = [s for s in sections if section_type_of(s) == req.section_type]
     if not target_secs: raise HTTPException(status_code=404, detail="ไม่พบกลุ่มเรียน")
     if not any(s.max_seats > 0 and s.enrolled_seats >= s.max_seats for s in target_secs): raise HTTPException(status_code=400, detail="กลุ่มเรียนนี้ยังไม่เต็ม")
     existing = db.query(Waitlist).filter(Waitlist.student_id == req.student_id, Waitlist.course_id == req.course_code, Waitlist.section_type == req.section_type, Waitlist.status == WaitlistStatus.PENDING).first()
@@ -988,7 +1021,7 @@ def get_waitlist_status(student_id: str, db: Session = Depends(get_db)):
     for w in waitlists:
         course = db.query(Course).filter(Course.course_id == w.course_id).first()
         secs = db.query(ClassSection).filter(ClassSection.course_id == w.course_id, ClassSection.section_number == w.section_number).all()
-        target_s = next((s for s in secs if get_section_type_from_room(s.room or "") == w.section_type), None)
+        target_s = next((s for s in secs if section_type_of(s) == w.section_type), None)
         cur_q = db.query(Waitlist).filter(Waitlist.course_id == w.course_id, Waitlist.section_number == w.section_number, Waitlist.section_type == w.section_type, Waitlist.status == WaitlistStatus.PENDING, Waitlist.created_at <= w.created_at).count() if w.status == WaitlistStatus.PENDING else 0
         result.append({"id": w.id, "course_id": w.course_id, "course_name": course.course_name if course else "Unknown", "section_number": w.section_number, "section_type": w.section_type, "status": w.status.value, "queue_position": cur_q, "created_at": w.created_at.isoformat(), "allocated_at": w.allocated_at.isoformat() if w.allocated_at else None, "schedule": f"{target_s.day_of_week} {target_s.start_time}-{target_s.end_time}" if target_s else "N/A", "room": target_s.room if target_s else "N/A"})
     return result
@@ -996,6 +1029,7 @@ def get_waitlist_status(student_id: str, db: Session = Depends(get_db)):
 # ฟังก์ชันนี้จะช่วยให้นักศึกษาสามารถยืนยันสิทธิ์การเข้าคิวรอของตัวเองได้เมื่อถึงคิวแล้ว โดยรับข้อมูลรหัสการเข้าคิวรอ ผ่าน URL parameter แล้วจะเช็คว่าการเข้าคิวรอที่มีรหัสนี้มีอยู่ไหม ถ้าไม่มี จะส่ง error 404 กลับไป ถ้ามี จะเช็คว่าสถานะของการเข้าคิวรอนี้เป็น "ALLOCATED" อยู่ไหม ถ้าไม่ใช่ จะส่ง error 400 กลับไป เพราะยังไม่ถึงคิวที่จะยืนยันสิทธิ์ ถ้าใช่ จะเช็คว่าวันและเวลาที่ได้รับสิทธิ์นี้เกิน 30 นาทีแล้วหรือยัง ถ้าเกินแล้ว จะอัพเดตสถานะของการเข้าคิวรอนี้เป็น "EXPIRED" และส่ง error 400 กลับไปพร้อมกับข้อความว่า หมดเวลายืนยันสิทธิ์ 30 นาที ถ้ายังไม่เกิน จะเช็คว่านักศึกษาคนนี้ได้ลงทะเบียนวิชานี้ไปแล้วหรือยัง ถ้าลงทะเบียนไปแล้ว จะส่ง error 400 กลับไปพร้อมกับข้อความว่า มีวิชานี้ในตารางเรียนแล้ว ถ้ามีในตะกร้าแล้ว จะส่ง error 400 กลับไปพร้อมกับข้อความว่า มีในตะกร้าแล้ว ลบออกก่อนยืนยัน ถ้าไม่มีปัญหาเรื่องการลงทะเบียน จะเช็คว่ากลุ่มเรียนนี้ชนกับตารางเรียนปัจจุบันของนักศึกษาคนนี้ไหม ถ้าชนกัน จะส่ง error 400 กลับไปพร้อมกับข้อความบอกว่าวันและเวลาที่ชนกันคืออะไร ถ้าไม่มีปัญหาเรื่องเวลาชนกัน จะเพิ่มข้อมูลการลงทะเบียนของนักศึกษาคนนี้ในวิชาและกลุ่มเรียนนี้ในตาราง Enrollment และอัพเดตสถานะของการเข้าคิวรอนี้เป็น "CONFIRMED" เพื่อให้ระบบรู้ว่านักศึกษาคนนี้ได้ยืนยันสิทธิ์และลงทะเบียนเรียบร้อยแล้ว หลังจากดำเนินการยืนยันสิทธิ์เสร็จแล้ว จะส่งข้อความยืนยันกลับไปว่า ยืนยันสิทธิ์สำเร็จ
 @app.post("/waitlist/confirm/{waitlist_id}")
 def confirm_waitlist_seat(waitlist_id: int, db: Session = Depends(get_db)):
+    assert_writable(db)
     entry = db.query(Waitlist).filter(Waitlist.id == waitlist_id).first()
     if not entry: raise HTTPException(status_code=404, detail="ไม่พบข้อมูลคิว")
     if entry.status != WaitlistStatus.ALLOCATED: raise HTTPException(status_code=400, detail="สถานะไม่ถูกต้อง")
@@ -1007,7 +1041,7 @@ def confirm_waitlist_seat(waitlist_id: int, db: Session = Depends(get_db)):
     in_cart = db.query(EnrollmentCart).filter(EnrollmentCart.student_id == entry.student_id, EnrollmentCart.course_id == entry.course_id, EnrollmentCart.section_type == entry.section_type).first()
     if in_cart: raise HTTPException(status_code=400, detail="มีในตะกร้าแล้ว ลบออกก่อนยืนยัน")
     secs = db.query(ClassSection).filter(ClassSection.course_id == entry.course_id, ClassSection.section_number == entry.section_number).all()
-    target = next((s for s in secs if get_section_type_from_room(s.room or "") == entry.section_type), None)
+    target = next((s for s in secs if section_type_of(s) == entry.section_type), None)
     if not target: raise HTTPException(status_code=404, detail="ไม่พบข้อมูลกลุ่ม")
     conf_msg = check_conflict_with_all([target], entry.student_id, db)
     if conf_msg: raise HTTPException(status_code=400, detail=f"เวลาเรียนชน: {conf_msg}")
@@ -1018,6 +1052,7 @@ def confirm_waitlist_seat(waitlist_id: int, db: Session = Depends(get_db)):
 # ฟังก์ชันนี้จะช่วยให้นักศึกษาสามารถสละสิทธิ์การเข้าคิวรอของตัวเองได้ โดยรับข้อมูลรหัสการเข้าคิวรอ ผ่าน URL parameter แล้วจะเช็คว่าการเข้าคิวรอที่มีรหัสนี้มีอยู่ไหม ถ้าไม่มี จะส่ง error 404 กลับไป ถ้ามี จะลบข้อมูลการเข้าคิวรอนี้ออกจากตาราง Waitlist และถ้าสถานะของการเข้าคิวรอนี้เป็น "ALLOCATED" อยู่ จะเช็คว่ามีคนที่อยู่ในคิวรอสำหรับวิชาและกลุ่มเรียนนี้ไหม ถ้ามี จะโอนสิทธิ์ให้กับคนที่อยู่ในคิวรอคนนั้นทันที และส่งข้อความแจ้งเตือนผ่านระบบ push notification ให้กับนักศึกษาคนนั้นด้วยว่า ถึงคิวของคุณแล้ว วิชานี้ว่างแล้ว ให้รีบยืนยันสิทธิ์ภายใน 30 นาที หลังจากดำเนินการสละสิทธิ์เสร็จแล้ว จะส่งข้อความยืนยันกลับไปว่า สละสิทธิ์สำเร็จ
 @app.post("/waitlist/cancel/{waitlist_id}")
 def cancel_waitlist_seat(waitlist_id: int, db: Session = Depends(get_db)):
+    assert_writable(db)
     waitlist = db.query(Waitlist).filter(Waitlist.id == waitlist_id).first()
     if not waitlist: raise HTTPException(status_code=404, detail="ไม่พบข้อมูลคิว")
     was_alloc = (waitlist.status == WaitlistStatus.ALLOCATED)
@@ -1028,7 +1063,7 @@ def cancel_waitlist_seat(waitlist_id: int, db: Session = Depends(get_db)):
         if next_w: next_w.status, next_w.allocated_at = WaitlistStatus.ALLOCATED, datetime.datetime.utcnow(); db.commit()
         else:
             secs = db.query(ClassSection).filter(ClassSection.course_id == c_id, ClassSection.section_number == s_num).all()
-            target = next((s for s in secs if get_section_type_from_room(s.room or "") == s_type), None)
+            target = next((s for s in secs if section_type_of(s) == s_type), None)
             if target and target.enrolled_seats > 0: target.enrolled_seats -= 1; db.commit()
     return {"message": "สละสิทธิ์สำเร็จ"}
 
@@ -1097,7 +1132,8 @@ def get_maintenance_status(db: Session = Depends(get_db)):
 # ฟังก์ชันนี้จะช่วยให้แอดมินสามารถค้นหานักศึกษาได้ โดยรับข้อมูลคำค้นหา ผ่าน URL query parameter แล้วจะเช็คว่านักศึกษาที่มีรหัสนักศึกษาหรือชื่อที่ตรงกับคำค้นหานี้มีอยู่ในระบบไหม ถ้าไม่มี จะส่งผลลัพธ์เป็น list ว่างกลับไป ถ้ามี จะดึงข้อมูลโปรไฟล์ของนักศึกษาคนนี้มาแสดงผล พร้อมกับรายการวิชาที่นักศึกษาคนนี้ลงทะเบียนอยู่ รายการวิชาที่นักศึกษาคนนี้เข้าคิวรอ และรายการเกรดของนักศึกษาคนนี้มาแสดงผล เพื่อให้นักศึกษาสามารถตรวจสอบข้อมูลของตัวเองได้อย่างสะดวก
 @app.get("/admin/students/search")
 def search_students(query: str, db: Session = Depends(get_db)):
-    students = db.query(Student).filter((Student.student_id.like(f"%{query}%")) | (Student.name.like(f"%{query}%"))).all()
+    # v2: limit 20 กัน LIKE %..% ลากทั้งตารางตอนข้อมูลโต
+    students = db.query(Student).filter((Student.student_id.like(f"%{query}%")) | (Student.name.like(f"%{query}%"))).limit(20).all()
     results = []
     for s in students:
         # 1. Enrolled Courses (using detailed joins)
@@ -1123,7 +1159,7 @@ def search_students(query: str, db: Session = Depends(get_db)):
         )
         
         for row in enrolled_query.all():
-            stype = get_section_type_from_room(row.room)
+            stype = section_type_of(row)
             if row.section_type and stype != row.section_type:
                 continue
             
@@ -1162,7 +1198,7 @@ def search_students(query: str, db: Session = Depends(get_db)):
         )
         
         for row in waitlist_query.all():
-            stype = get_section_type_from_room(row.room)
+            stype = section_type_of(row)
             if row.section_type and stype != row.section_type:
                 continue
                 
@@ -1215,6 +1251,7 @@ def update_push_token(student_id: str, data: PushTokenUpdate, db: Session = Depe
 # เปลี่ยนรหัสผ่านนักศึกษา: เช็ครหัสเดิมก่อน แล้ว hash รหัสใหม่ทับ
 @app.post("/students/{student_id}/change-password")
 def change_password(student_id: str, data: PasswordChangeRequest, db: Session = Depends(get_db)):
+    assert_writable(db)
     student = db.query(Student).filter(Student.student_id == student_id).first()
     if not student:
         raise HTTPException(status_code=404, detail="ไม่พบข้อมูลนักศึกษา")
@@ -1271,7 +1308,7 @@ def allocate_waitlist_seats():
         pending_groups = db.query(Waitlist.course_id, Waitlist.section_number, Waitlist.section_type).filter(Waitlist.status == WaitlistStatus.PENDING).distinct().all()
         for c_id, s_num, s_type in pending_groups:
             sections = db.query(ClassSection).filter(ClassSection.course_id == c_id, ClassSection.section_number == s_num).all()
-            target = next((s for s in sections if get_section_type_from_room(s.room or "") == s_type), None)
+            target = next((s for s in sections if section_type_of(s) == s_type), None)
             if target and target.enrolled_seats < target.max_seats:
                 avail = target.max_seats - target.enrolled_seats
                 next_in_line = db.query(Waitlist).filter(

@@ -1,0 +1,12 @@
+# Slim requirements สำหรับ Faable free (artifact limit 512MB)
+# ใช้เฉพาะ lib ที่ backend import จริง (ตัด ortools/pandas/numpy/passlib ที่ไม่ได้ใช้แล้ว)
+APScheduler==3.11.2
+bcrypt==5.0.0
+exponent_server_sdk==2.2.0
+fastapi==0.135.2
+psycopg2-binary==2.9.11
+python-dotenv==1.0.1
+requests==2.33.1
+SQLAlchemy==2.0.48
+tzdata==2025.3
+uvicorn==0.42.0

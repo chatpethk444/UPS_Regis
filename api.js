@@ -2,7 +2,7 @@
 // ✅ แก้ IP ที่นี่ที่เดียว ไม่ต้องแก้ทุกไฟล์ (usePushNotifications ดึง BASE_URL จากนี่)
 // สำหรับเครื่องจริง: เปลี่ยนเป็น IP เครื่องคอม เช่น "http://192.168.1.x:8000"
 
-export const BASE_URL = "https://strong-asbestos-sean-trading.trycloudflare.com"; // Tunnel ชั่วคราว (Faable ล่ม)
+export const BASE_URL = "https://ups-regis-k49tx.faable.link"; // Faable backend ถาวร (HTTPS)
 //export const BASE_URL = "https://ups-regis-1api.onrender.com"; // Render เก่าโดน suspended
 //export const BASE_URL = "http://localhost:8000"; // เทสบนคอม (Expo web)
 

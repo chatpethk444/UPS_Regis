@@ -11,10 +11,10 @@ except ImportError:
     pass
 
 # v2: อ่านจาก env เท่านั้น ห้าม hardcode secret (ดู .env.example)
-# รองรับชื่อเก่า OLD_DATABASE_URL ด้วยตอน migrate
-DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("OLD_DATABASE_URL")
+# ลำดับ: APP_DATABASE_URL (Replit จองชื่อ DATABASE_URL ไว้) -> DATABASE_URL -> OLD_DATABASE_URL
+DATABASE_URL = os.getenv("APP_DATABASE_URL") or os.getenv("DATABASE_URL") or os.getenv("OLD_DATABASE_URL")
 if not DATABASE_URL:
-    raise RuntimeError("ตั้ง env DATABASE_URL ก่อน (ดู backend/.env.example)")
+    raise RuntimeError("ตั้ง env APP_DATABASE_URL/DATABASE_URL ก่อน (ดู backend/.env.example)")
 engine = create_engine(
     DATABASE_URL,
     pool_size=10,          # จำนวน connection สูงสุดใน pool

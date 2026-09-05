@@ -1,0 +1,3 @@
+# Replit fallback (Faable builder พังฝั่ง platform)
+# Import repo นี้ใน Replit -> ตั้ง Secret DATABASE_URL -> Run
+run = "uvicorn main:app --app-dir backend --host 0.0.0.0 --port $PORT"

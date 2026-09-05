@@ -495,11 +495,26 @@ export default function CartScreen({ student, setView }) {
       "ต้องการลงทะเบียนวิชาในตะกร้าทั้งหมดหรือไม่?",
       async () => {
         try {
-          await confirmEnrollmentAPI(student.student_id);
-          // ถ้าลงทะเบียนผ่าน ให้เด้ง Pop-up Success แล้วพอปิดค่อยไปหน้า Schedule
-          showCustomAlert("success", "สำเร็จ", "ลงทะเบียนเรียบร้อย!", () =>
-            setView("SCHEDULE"),
-          );
+          const res = await confirmEnrollmentAPI(student.student_id);
+          await fetchCart(false); // โหลดตะกร้าใหม่ (วิชาที่ล้มเหลวยังค้างอยู่)
+          const failedList = (res.failed || [])
+            .map((f) => `• ${f.course_code} กลุ่ม ${f.section_number}: ${f.reason}`)
+            .join("\n");
+          if (res.status === "failed") {
+            showCustomAlert("error", "ลงทะเบียนไม่สำเร็จ", res.message);
+          } else if (res.status === "partial") {
+            showCustomAlert(
+              "warning",
+              "ลงทะเบียนได้บางส่วน",
+              `${res.message}\n\nค้างในตะกร้า:\n${failedList}`,
+              () => setView("SCHEDULE"),
+            );
+          } else {
+            // ถ้าลงทะเบียนผ่าน ให้เด้ง Pop-up Success แล้วพอปิดค่อยไปหน้า Schedule
+            showCustomAlert("success", "สำเร็จ", "ลงทะเบียนเรียบร้อย!", () =>
+              setView("SCHEDULE"),
+            );
+          }
         } catch (e) {
           showCustomAlert("error", "ข้อผิดพลาด", e.message);
         }

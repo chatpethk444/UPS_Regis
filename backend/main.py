@@ -684,22 +684,47 @@ def confirm_enrollment(student_id: str, db: Session = Depends(get_db)):
     if not is_regis_open(db): raise HTTPException(status_code=400, detail="ขณะนี้ระบบปิดรับการลงทะเบียนชั่วคราว")
     cart_items = db.query(EnrollmentCart).filter(EnrollmentCart.student_id == student_id).all()
     if not cart_items: raise HTTPException(status_code=400, detail="ตะกร้าว่างเปล่า")
+    # v2 partial: วิชาไหนเต็มก็ข้าม เก็บเหตุผลไว้ ไม่เททั้งตะกร้า
+    # วิชาที่สำเร็จถูกลบออกจากตะกร้า วิชาที่ล้มเหลวค้างในตะกร้าให้แก้ต่อ
+    enrolled, failed, done_ids = [], [], []
     for item in cart_items:
+        ref = {"course_code": item.course_id, "section_number": item.section_number,
+               "section_type": item.section_type}
         existing = db.query(Enrollment).filter(Enrollment.student_id == student_id, Enrollment.course_id == item.course_id, Enrollment.section_type == item.section_type).first()
-        if not existing:
-            sections = db.query(ClassSection).with_for_update().filter(ClassSection.course_id == item.course_id, ClassSection.section_number == extract_section_int(item.section_number)).all()
-            target_section = next((s for s in sections if get_section_type_from_room(s.room or "") == item.section_type), None)
-            if not target_section and sections: target_section = sections[0]
-            if target_section:
-                cap, enr = target_section.max_seats or 0, target_section.enrolled_seats or 0
-                if cap > 0 and enr >= cap:
-                    raise HTTPException(status_code=400, detail=f"วิชา {item.course_id} กลุ่ม {item.section_number} ที่นั่งเต็มแล้ว")
-                target_section.enrolled_seats = enr + 1
-            new_enroll = Enrollment(student_id=student_id, course_id=item.course_id, section_number=item.section_number, section_type=item.section_type)
-            db.add(new_enroll)
-    db.query(EnrollmentCart).filter(EnrollmentCart.student_id == student_id).delete()
+        if existing:
+            enrolled.append({**ref, "status": "already"})
+            done_ids.append(item.cart_id)
+            continue
+        sections = db.query(ClassSection).with_for_update().filter(ClassSection.course_id == item.course_id, ClassSection.section_number == extract_section_int(item.section_number)).all()
+        target_section = next((s for s in sections if get_section_type_from_room(s.room or "") == item.section_type), None)
+        if not target_section and sections: target_section = sections[0]
+        if not target_section:
+            failed.append({**ref, "reason": "ไม่พบกลุ่มเรียนนี้ในระบบ"})
+            continue
+        cap, enr = target_section.max_seats or 0, target_section.enrolled_seats or 0
+        if cap > 0 and enr >= cap:
+            failed.append({**ref, "reason": f"ที่นั่งเต็มแล้ว ({enr}/{cap})"})
+            continue
+        target_section.enrolled_seats = enr + 1
+        new_enroll = Enrollment(student_id=student_id, course_id=item.course_id, section_number=item.section_number, section_type=item.section_type)
+        db.add(new_enroll)
+        enrolled.append({**ref, "status": "ok"})
+        done_ids.append(item.cart_id)
+    if done_ids:
+        db.query(EnrollmentCart).filter(EnrollmentCart.cart_id.in_(done_ids)).delete(synchronize_session=False)
     db.commit()
-    return {"message": "ลงทะเบียนสำเร็จ"}
+    total = len(cart_items)
+    if not failed:
+        return {"status": "success", "message": f"ลงทะเบียนสำเร็จ {len(enrolled)}/{total} วิชา",
+                "enrolled": enrolled, "failed": failed}
+    if not enrolled:
+        return {"status": "failed",
+                "message": "ไม่สามารถลงทะเบียนได้เลย: " + "; ".join(
+                    f"{f['course_code']} กลุ่ม {f['section_number']} ({f['reason']})" for f in failed),
+                "enrolled": enrolled, "failed": failed}
+    return {"status": "partial",
+            "message": f"ลงทะเบียนได้ {len(enrolled)}/{total} วิชา",
+            "enrolled": enrolled, "failed": failed}
 
 # ================= 5. Group Sync =================
 # ฟังก์ชันนี้จะช่วยให้ผู้ใช้สามารถสร้างกลุ่มเรียนได้ โดยรับข้อมูลรหัสนักศึกษา ผ่าน URL parameter แล้วจะเช็คว่านักศึกษาคนนี้มีอยู่ในระบบไหม ถ้าไม่มี จะส่ง error 404 กลับไป ถ้ามี จะเช็คว่านักศึกษาคนนี้มีกลุ่มเรียนอยู่แล้วหรือยัง ถ้ามีแล้ว จะส่ง error 400 กลับไปพร้อมกับข้อความว่า คุณมีกลุ่มอยู่แล้ว ถ้ายังไม่มี จะสร้างกลุ่มเรียนใหม่ขึ้นมา โดยกำหนดให้นักศึกษาคนนี้เป็นหัวหน้ากลุ่ม และสร้างรหัสกลุ่มแบบสุ่มที่ไม่ซ้ำกับกลุ่มอื่นๆ ในระบบ แล้วจะเพิ่มข้อมูลกลุ่มเรียนลงในตาราง StudyGroup และเพิ่มข้อมูลสมาชิกกลุ่มลงในตาราง GroupMember โดยกำหนดสถานะของสมาชิกคนนี้เป็น "APPROVED" หลังจากสร้างกลุ่มเรียนเสร็จแล้ว จะส่งข้อความยืนยันกลับไปพร้อมกับรหัสกลุ่มที่สร้างขึ้นมา

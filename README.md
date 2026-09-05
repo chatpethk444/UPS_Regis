@@ -1,11 +1,293 @@
-# UPS Regis — ระบบลงทะเบียนวิชาผ่านมือถือ
+**UPS Regis — ระบบลงทะเบียนเรียนผ่านแอปพลิเคชันมือถือ**
 
-> **Demo ทางวิชาการเท่านั้น** — "UPS" เป็นสถาบันสมมติ ไม่มีส่วนเกี่ยวข้องกับมหาวิทยาลัยจริง
-> ไม่ได้ใช้งานจริงในการลงทะเบียนของสถาบันใด
+> **สำหรับจัดแสดงผลงานทางวิชาการเท่านั้น (Demo)** — "UPS" เป็นสถาบันสมมติ ไม่มีส่วนเกี่ยวข้องกับมหาวิทยาลัยจริง และไม่ได้นำไปใช้งานในระบบลงทะเบียนของสถาบันใด
 
-แอปมือถือ (React Native / Expo) สำหรับนักศึกษา: ค้นหาวิชา, วางแผนตารางด้วย AI,
-ตะกร้าลงทะเบียน, ซิงค์กับกลุ่มเพื่อน, เข้าคิววิชาที่เต็ม (Waitlist) พร้อมแจ้งเตือน —
-และจอแอดมินสำหรับเปิด/ปิดรอบลงทะเบียนและโหมดปรับปรุงระบบ
+แอปพลิเคชันมือถือ (พัฒนาด้วย React Native / Expo) สำหรับนักศึกษา ตอบโจทย์ครบทุกฟังก์ชัน: ค้นหารายวิชา, จัดตารางเรียนด้วย AI, ระบบตะกร้าลงทะเบียน, ซิงค์ข้อมูลกับกลุ่มเพื่อน, เข้าคิวรายวิชาที่เต็ม (Waitlist) พร้อมระบบแจ้งเตือน — รวมถึงมีหน้าจอสำหรับผู้ดูแลระบบ (Admin) เพื่อเปิด-ปิดรอบลงทะเบียนและเปิดโหมดปรับปรุงระบบ
+
+#### **สารบัญ**
+
+- **สถาปัตยกรรมระบบ**
+- **เทคโนโลยีที่ใช้**
+- **สิ่งที่ต้องเตรียมก่อนเริ่มใช้งาน**
+- **การเริ่มต้นใช้งานด่วน**
+- **การตั้งค่า Backend**
+- **การตั้งค่าฐานข้อมูล**
+- **การตั้งค่า Frontend**
+- **ตัวแปรแวดล้อมและข้อมูลสำคัญ (Secrets)**
+- **วิธีใช้งานตามบทบาท**
+- **สรุปรายการ API**
+- **บัญชีผู้ใช้สำหรับทดสอบ**
+- **สคริปต์ช่วยอำนวยความสะดวก**
+- **การปรับใช้ระบบจริง (Deploy to Production)**
+- **การแก้ปัญหาเบื้องต้น**
+- **ข้อควรทราบด้านความปลอดภัย**
+- **โครงสร้างโปรเจกต์**
+
+#### **สถาปัตยกรรมระบบ**
+
+```text
+┌──────────────┐   HTTPS/JSON   ┌──────────────┐   SQL (pooler :6543)   ┌──────────────┐
+│  Expo App    │ ────────────► │   FastAPI    │ ─────────────────────► │  Supabase    │
+│ (11 screens) │ ◄──────────── │  (main.py)   │                        │  Postgres    │
+└──────────────┘  BASE_URL     └──────────────┘                        └──────────────┘
+      │ ส่งข้อมูลลงทะเบียน push ผ่าน usePushNotifications → POST /students/{id}/push-token
+      │ ส่งแจ้งเตือนออกไปยังผู้ใช้ผ่าน Expo Push Service (exponent_server_sdk)
+
+```
+
+- **การเปลี่ยนหน้าจอในแอป (Routing):** ควบคุมผ่าน State (`App.js` สลับแสดงผลตาม `view`) โดยไม่ใช้ React Navigation
+- **แถบเมนูหลัก (Navbar):** ใช้คอมโพเนนต์กลาง `NavBar` จาก `components/shared.js` ร่วมกันทั้ง 9 หน้าจอ
+- **ระบบหลังบ้าน (Backend):** ทำงานแบบ Process เดียว พร้อมตั้งเวลาทำงานอัตโนมัติด้วย APScheduler 2 งาน (ยกเลิกสิทธิ์ Waitlist ที่หมดอายุ และจัดสรรที่นั่งว่าง ทุกๆ 1 นาที)
+
+#### **เทคโนโลยีที่ใช้**
+
+| ส่วนงาน                     | เทคโนโลยี                                    | เวอร์ชัน                  |
+| --------------------------- | -------------------------------------------- | ------------------------- |
+| แอปพลิเคชันมือถือ           | Expo SDK / React Native / React              | ~54 / 0.81 / 19.1         |
+| ภาษาที่ใช้พัฒนาแอป          | JavaScript (React)                           | —                         |
+| ระบบหลังบ้าน                | FastAPI / Uvicorn / SQLAlchemy / APScheduler | 0.135 / 0.42 / 2.0 / 3.11 |
+| ฐานข้อมูล                   | Supabase Postgres (ผ่าน Connection Pooler)   | —                         |
+| ระบบยืนยันตัวตน/แจ้งเตือน   | bcrypt hash / Expo Notifications             | —                         |
+| ผู้ให้บริการโฮสติ้งปัจจุบัน | Faable (รองรับ HTTPS)                        | —                         |
+| เครื่องมือสร้างแอปทดสอบ     | EAS development client                       | —                         |
+
+#### **สิ่งที่ต้องเตรียมก่อนเริ่มใช้งาน**
+
+- Node.js LTS + npm (ตรวจสอบเวอร์ชันด้วยคำสั่ง `node --version`)
+- Python 3.11 (ตรวจสอบเวอร์ชันด้วยคำสั่ง `python --version`)
+- บัญชี Supabase (1 โปรเจกต์) พร้อมข้อความเชื่อมต่อฐานข้อมูล (Connection String) แบบ **Pooler พอร์ต `:6543**`
+- แอปพลิเคชัน Expo Go (สำหรับทดสอบทั่วไป) หรือไฟล์ dev build APK (สำหรับทดสอบระบบแจ้งเตือน Push Notification)
+- ระบบปฏิบัติการ Windows PowerShell (สำหรับรันสคริปต์ในโฟลเดอร์ `scripts/*.ps1`)
+
+#### **การเริ่มต้นใช้งานด่วน**
+
+```powershell
+# 1) การตั้งค่า Frontend
+npm install
+npx expo start            # สแกน QR Code เพื่อเปิดผ่าน Expo Go หรือ Dev Build
+
+# 2) การตั้งค่า Backend (เปิด Terminal ใหม่ แล้วเข้าไปที่โฟลเดอร์ backend\)
+pip install -r backend\requirements.txt
+copy backend\.env.example backend\.env   # จากนั้นระบุค่า DATABASE_URL จริงลงในไฟล์
+cd backend
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+```
+
+เมื่อทดลองเปิด URL `http://localhost:8000/admin/config` จะต้องได้รับข้อความตอบรับเป็น `{"registration_open":true}`
+
+> **หมายเหตุ:** หากทดสอบด้วยโทรศัพท์มือถือจริง เครื่องมือถือและคอมพิวเตอร์จะต้องเชื่อมต่อ Wi-Fi เดียวกัน และต้องแก้ไขไฟล์ `api.js` ให้ระบุ `BASE_URL` เป็น IP Address หรือ URL ที่มือถือสามารถเข้าถึงได้ (ห้ามใช้ `localhost` บนโทรศัพท์มือถือ)
+
+#### **การตั้งค่า Backend**
+
+```powershell
+cd backend
+python -m venv .venv; .\.venv\Scripts\Activate.ps1   # ข้อแนะนำ: ควรเปิดใช้งาน Virtual Environment
+pip install -r requirements.txt
+
+```
+
+สร้างไฟล์ `backend/.env` (ไฟล์นี้ถูกตั้งค่า Git Ignore ไว้ ห้าม Commit ลง Git):
+
+```env
+DATABASE_URL=postgresql://postgres.<REF>:<PASSWORD>@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres
+
+```
+
+**ข้อบังคับสำหรับข้อความเชื่อมต่อฐานข้อมูล (Connection String):**
+
+- ต้องเชื่อมต่อผ่าน **Pooler พอร์ต `:6543**`เท่านั้น ห้ามใช้พอร์ตตรง`db.xxx:5432` (เนื่องจากรองรับเฉพาะ IPv6 ทำให้เชื่อมต่อไม่สำเร็จ)
+- ชื่อผู้ใช้ต้องมีต่อท้ายด้วย `.<REF>` (เช่น `postgres.<REF>`) เพื่อให้ใช้งานผ่าน Pooler ได้
+- ทุกครั้งที่มีการแก้ไขไฟล์ `.env` จะต้อง **รีสตาร์ท Uvicorn ใหม่** (ระบบ Reload อัตโนมัติจะไม่ตรวจจับการเปลี่ยนแปลงในไฟล์ `.env`)
+
+#### **การตั้งค่าฐานข้อมูล**
+
+เข้าใช้งาน Supabase Dashboard แล้วไปที่เมนู SQL Editor จากนั้นรันคำสั่งตามลำดับ (ใช้กับโปรเจกต์ใหม่ที่ยังไม่มีข้อมูล):
+
+1. `backend/supabase/migrations/0001_schema_v2.sql` — สร้าง 14 ตารางข้อมูล พร้อมกำหนด Data Type, Index และค่าเริ่มต้นระบบ
+2. `backend/supabase/migrations/0002_seed_demo.sql` — นำเข้าข้อมูลตัวอย่าง (สามารถรันซ้ำได้)
+
+**คำสั่งตรวจสอบความถูกต้องหลังรันสคริปต์:**
+
+```sql
+SELECT count(*) FROM student;        -- ผลลัพธ์ต้องได้ 10
+SELECT count(*) FROM course;         -- ผลลัพธ์ต้องได้ 12
+SELECT count(*) FROM class_section;  -- ผลลัพธ์ต้องได้ 22
+SELECT * FROM system_config;         -- ต้องแสดง registration_open=true, maintenance_mode=false
+
+```
+
+**รายละเอียดฟิลด์ข้อมูลสำคัญ:**
+
+- `student.password_hash` — เข้ารหัสแบบ bcrypt (`$2a$`/`$2b$`) โดยไม่เก็บรหัสผ่านจริง
+- `course.credits` — ใช้ประเภทข้อมูล SMALLINT
+- `class_section.section_type` (`T`/`L`) — ฟิลด์แยกประเภททฤษฎี/ปฏิบัติ (ฟิลด์ `room` ยังคงระบุ `(ท)/(ป)` ไว้เพื่อรองรับโค้ดรุ่นเก่า)
+- `enrollment` — กำหนดเงื่อนไข UNIQUE `(student_id, course_id, section_type)` เพื่อป้องกันการลงทะเบียนซ้ำในระดับฐานข้อมูล
+- **สูตรการคำนวณจำนวนที่นั่งคงเหลือ:** `enrolled_seats = จำนวนผู้ลงทะเบียนสำเร็จ + จำนวนผู้ได้รับสิทธิ์ชั่วคราว (ALLOCATED)`
+
+#### **การตั้งค่า Frontend**
+
+```powershell
+npm install
+
+```
+
+แก้ไขไฟล์ `api.js` ตรงบรรทัด `BASE_URL` ให้ตรงกับระบบ Backend ที่ใช้งาน (จุดนี้เป็นศูนย์กลางจุดเดียว ซึ่ง `usePushNotifications` จะดึงค่าไปใช้ด้วย):
+
+| สภาพแวดล้อมการใช้งาน                                 | ค่าที่ต้องกำหนด                                                              |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Backend ระบบจริง (Faable)                            | `[https://ups-regis-k49tx.faable.link](https://ups-regis-k49tx.faable.link)` |
+| Backend บนคอมพิวเตอร์ + ทดสอบผ่าน Expo Go หรือมือถือ | `http://<IP-คอมพิวเตอร์>:8000`                                               |
+| เปิดผ่าน Expo Web บนคอมพิวเตอร์                      | `http://localhost:8000`                                                      |
+
+**คำสั่งเริ่มทำงาน:**
+
+```powershell
+npx expo start                 # รันผ่าน Expo Go (ระบบ Push Notification จะไม่ทำงานใน SDK 53+)
+npx expo start --dev-client    # รันผ่าน Dev Build (รองรับการใช้งาน Push Notification)
+
+```
+
+**คำสั่งสร้าง Dev Build สำหรับ Android:**
+
+```powershell
+eas build --profile development --platform android
+
+```
+
+> **ข้อควรจำ:** การใช้งานระบบ Push Notification จำเป็นต้องมีไฟล์ `google-services.json` (ตั้งค่าจาก Firebase กำหนด Package Name เป็น `com.chatpeth.RegistrationApp`) วางไว้ที่ Root ของโปรเจกต์ก่อนสร้าง Build ใหม่ หากไม่มีไฟล์นี้จะไม่สามารถขอ Token การแจ้งเตือนได้
+
+#### **ตัวแปรแวดล้อมและข้อมูลสำคัญ (Secrets)**
+
+| ตำแหน่งจัดเก็บ                             | ชื่อตัวแปร                                             | วัตถุประสงค์การใช้งาน                                         |
+| ------------------------------------------ | ------------------------------------------------------ | ------------------------------------------------------------- |
+| `backend/.env` (เครื่อง Local ห้าม Commit) | `DATABASE_URL`                                         | ใช้สำหรับให้ Backend เชื่อมต่อไปยัง Postgres                  |
+| Faable / Replit Secrets                    | `DATABASE_URL` (หรือ `APP_DATABASE_URL` สำหรับ Replit) | ใช้สำหรับ Backend บนผู้ให้บริการโฮสติ้ง                       |
+| `api.js`                                   | `BASE_URL`                                             | ใช้สำหรับให้แอปพลิเคชันชี้ไปยังตำแหน่ง Backend                |
+| Supabase                                   | DB Password                                            | รหัสผ่านฐานข้อมูล (เปลี่ยนได้ที่ Project Settings → Database) |
+
+#### **วิธีใช้งานตามบทบาท**
+
+**สำหรับนักศึกษา** (กดปุ่ม `MENU` → จะพบ 4 เมนูหลัก: หน้าแรก / รายวิชา / ตะกร้า / ตารางเรียน)
+
+1. เข้าสู่ระบบด้วยรหัสนักศึกษาและรหัสผ่าน
+2. **เมนูรายวิชา:** ค้นหาและเลือกกลุ่มเรียนด้วยตนเอง หรือให้ระบบ AI ช่วยจัดตารางเรียนโดยไม่ให้เวลาชนกัน (สร้างได้สูงสุด 10 รายวิชา หรือ 10 รูปแบบตาราง)
+3. **เมนูลงทะเบียนยกภาค:** เพิ่มรายวิชาบังคับแบบกลุ่ม (ระบบจะข้ามวิชาที่มีอยู่แล้ว และเลือกกลุ่มเรียนที่ยังว่างให้อัตโนมัติ)
+4. **เมนูตะกร้า:** ตรวจสอบเวลาเรียนชน → ยืนยันการลงทะเบียน (หากมีบางวิชาเต็ม ระบบจะไม่ยกเลิกทั้งตะกร้า แต่จะลงทะเบียนวิชาที่ได้ให้สำเร็จ และค้างวิชาที่เต็มไว้พร้อมระบุเหตุผล)
+5. **เมนูเพื่อนช่วยลง:** สร้างหรือเข้าร่วมกลุ่ม (สูงสุด 5 คน) โดยหัวหน้ากลุ่มสามารถซิงค์ข้อมูลตะกร้าและกดลงทะเบียนแทนเพื่อนทุกคนในกลุ่มได้
+6. **ระบบคิวสำรอง (Waitlist):** เข้าคิวรอรายวิชาที่เต็ม เมื่อได้รับสิทธิ์แล้วต้องมากดยืนยันภายใน **30 นาที** (หากเกินเวลาสิทธิ์จะหลุดไปยังคิวถัดไป)
+7. **เมนูข้อมูลส่วนตัว (Profile):** ตรวจสอบผลการเรียน/เกรดเฉลี่ยสะสม (CGPA), เปลี่ยนรหัสผ่าน และออกจากระบบ
+
+**สำหรับผู้ดูแลระบบ (Admin)** (เข้าสู่หน้า `ADMIN_HOME` หลังล็อกอินด้วยรหัสผ่านแอดมิน)
+
+- เปิด-ปิดรอบการลงทะเบียน และเปิด-ปิดโหมดปรับปรุงระบบ (เมื่อปิดระบบ Endpoint ทั้งหมดจะปฏิเสธการเขียนข้อมูลด้วยรหัส 403 โดยอนุญาตให้เรียกอ่านข้อมูลได้อย่างเดียว)
+- ค้นหาข้อมูลนักศึกษา (แสดงผลสูงสุด 20 รายการ) เพื่อดูตารางเรียน, รายการคิวสำรอง และผลการเรียน
+- ระบบประมวลผลคำนวณปรับปรุงยอดที่นั่งใหม่รายกลุ่มเรียน (`POST /admin/recount-seats`)
+
+#### **สรุปรายการ API**
+
+URL หลัก (Base URL): `[https://ups-regis-k49tx.faable.link](https://ups-regis-k49tx.faable.link)` (หรือ `http://<host>:8000` ขณะพัฒนาในเครื่อง)
+
+| หมวดหมู่           | Endpoints                                                                                                                                                     |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ระบบยืนยันตัวตน    | `POST /login` (ตรวจสอบรหัสผ่าน bcrypt พร้อมระบบจำกัดจำนวนครั้ง หากกรอกผิด 5 ครั้งภายใน 15 นาที ระบบจะตอบกลับด้วยรหัส 429)                                     |
+| ข้อมูลรายวิชา      | `GET /courses/available/{id}`, `/courses/suggested/{id}`, `/sections/{code}`, `/courses/{id}/sections`, `/z-options/{id}/{z}`                                 |
+| ระบบปัญญาประดิษฐ์  | `POST /ai-suggest`                                                                                                                                            |
+| ตะกร้าลงทะเบียน    | `POST /cart/add`, `GET /cart/{id}`, `POST /cart/batch_add_with_check`, `POST /cart/remove`, `POST /cart/confirm/{id}` (คืนค่าสถานะ: `success/partial/failed`) |
+| ระบบลงทะเบียนกลุ่ม | `POST /group/create                                                                                                                                           |
+| การลงทะเบียน       | `GET /enroll/my/{id}`, `POST /enrollment/withdraw`                                                                                                            |
+| ระบบคิวสำรอง       | `POST /waitlist/join                                                                                                                                          |
+| ข้อมูลนักศึกษา     | `POST /students/{id}/push-token`, `POST /students/{id}/change-password`                                                                                       |
+| ผู้ดูแลระบบ        | `GET /admin/config                                                                                                                                            |
+
+เอกสาร API แบบ Interactive (เมื่อรันในเครื่อง): `http://localhost:8000/docs`
+
+#### **บัญชีผู้ใช้สำหรับทดสอบ**
+
+รหัสผ่านเริ่มต้นของทุกบัญชีคือ `123456` (แนะนำให้เปลี่ยนรหัสผ่านทันทีหลังเข้าสู่ระบบครั้งแรกผ่านหน้า Profile)
+
+| รหัสนักศึกษา / รหัสผ่าน | บทบาท                          | หมายเหตุ                                                    |
+| ----------------------- | ------------------------------ | ----------------------------------------------------------- |
+| `68100001`–`68100004`   | นักศึกษา CPE ชั้นปีที่ 1       | บัญชีสำหรับทดสอบทั่วไป                                      |
+| `68100101`              | นักศึกษา ICT ชั้นปีที่ 1       | —                                                           |
+| `67100001`              | นักศึกษา CPE ชั้นปีที่ 2       | มีข้อมูลเกรดตัวอย่างในระบบ                                  |
+| `66100001`              | นักศึกษา CPE ชั้นปีที่ 3       | —                                                           |
+| `68300001` / `67300001` | นักศึกษา LSM ชั้นปีที่ 1 และ 2 | —                                                           |
+| `ADM001`                | ผู้ดูแลระบบ (Admin)            | สำหรับเข้าใช้งานหน้าจอ Admin                                |
+| รายวิชา GEN101 กลุ่ม 2  | —                              | ตั้งค่าที่นั่งเต็ม 60/60 ไว้สำหรับทดสอบระบบคิวรอ (Waitlist) |
+
+#### **สคริปต์ช่วยอำนวยความสะดวก**
+
+สคริปต์ในโฟลเดอร์ `scripts/*.ps1` (เรียกใช้งานโดยคลิกขวาแล้วเลือก Run with PowerShell):
+
+- `start-all.ps1` — รันระบบ Backend พร้อมเปิด Tunnel ทำงานเบื้องหลัง และซิงค์ค่า `BASE_URL` ให้อัตโนมัติ
+- `sync-baseurl.ps1` — อ่านค่า URL ล่าสุดจาก Tunnel นำมาอัปเดตลงในไฟล์ `api.js`
+- `stop-all.ps1` — สั่งหยุดการทำงานของสคริปต์และระบบทั้งหมด
+- `common.ps1` — ไฟล์รวมค่าคอนฟิกพื้นฐาน (ไม่จำเป็นต้องสั่งรันโดยตรง)
+
+สคริปต์สำรองข้อมูลฐานข้อมูลเดิม: `python backend/backup_old_db.py` (ต้องกำหนดค่า `OLD_DATABASE_URL` ก่อนใช้งาน โดยไฟล์สำรองจะถูกจัดเก็บไว้ที่ `backend/supabase/backup/` ซึ่งตั้งค่า Git Ignore ไว้)
+
+#### **การปรับใช้ระบบจริง (Deploy to Production)**
+
+- **ระบบ Backend ปัจจุบัน:** ปรับใช้บน Faable (แพ็กเกจฟรี) — เมื่อสั่ง Push โค้ดไปยังสาขา `main` ระบบจะทำการ Deploy ให้อัตโนมัติ ทั้งนี้ต้องตั้งค่า Secret `DATABASE_URL` ในหน้า Dashboard ของบริการด้วย
+- **ตัวเลือกอื่นที่เคยทดลอง:** Render (ต้องยืนยันตัวตนด้วยบัตรเครดิต), Hugging Face Spaces (ต้องสมัครสมาชิก PRO เพื่อใช้ Docker), Koyeb (ปิดรับสมัครผู้ใช้ใหม่), Cloudflare Tunnel (เหมาะสำหรับชั่วคราว เนื่องจากต้องเปิดคอมพิวเตอร์ไว้ตลอดเวลา)
+- **การสำรองข้อมูลบน Replit:** โปรเจกต์มีไฟล์ `.replit` รองรับแล้ว โดยให้ตั้งชื่อ Secret ว่า `APP_DATABASE_URL` (เนื่องจากชื่อ `DATABASE_URL` ถูกระบบจองไว้)
+
+#### **การแก้ปัญหาเบื้องต้น**
+
+| ปัญหาที่พบ                                        | สาเหตุและแนวทางการแก้ไข                                                                                                                                           |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ข้อผิดพลาด `password authentication failed`       | รหัสผ่านในไฟล์ `.env` หรือ Secret ไม่ถูกต้อง → ให้ทำการรีเซ็ตรหัสผ่านใหม่ใน Supabase และนำมาอัปเดตทั้ง 2 จุด จากนั้นสั่งรีสตาร์ท Backend                          |
+| ข้อผิดพลาด `could not translate host name db.xxx` | เกิดจากการใช้ข้อความเชื่อมต่อแบบ Direct พอร์ต `:5432` → ให้เปลี่ยนไปใช้พอร์ต Pooler `:6543` แทน                                                                   |
+| แก้ไขไฟล์ `.env` แล้วระบบไม่เปลี่ยนแปลง           | ระบบ Reloader ไม่ตรวจจับไฟล์ `.env` → ให้กด `Ctrl+C` เพื่อหยุดการทำงาน แล้วสั่งรัน Uvicorn ใหม่อีกครั้ง                                                           |
+| โทรศัพท์มือถือไม่สามารถเชื่อมต่อ Backend ได้      | ตรวจสอบว่าได้ใช้ IP Address ของวง LAN หรือยัง (ห้ามใช้ `localhost`) และต้องรัน Uvicorn ด้วยพารามิเตอร์ `--host 0.0.0.0` รวมถึงอุปกรณ์ต้องเชื่อมต่อ Wi-Fi เดียวกัน |
+| หน้าจอแจ้งเตือน (Alert) แสดงผลเป็น HTML           | ระบบ Backend ล่มหรือถูกระงับการทำงาน → โค้ดใน `api.js` ถูกเขียนดักจับไว้แล้ว ระบบจะแสดงข้อความแนะนำให้ตรวจสอบ Backend                                             |
+| การเข้าสู่ระบบติดรหัส 429                         | กรอกรหัสผ่านผิดเกิน 5 ครั้งภายใน 15 นาที → ให้รอจนครบกำหนดเวลา หรือสั่งรีสตาร์ท Backend เพื่อล้างตัวนับในหน่วยความจำ                                              |
+| แสดงผล `Invalid Date` หรือตัวนับเวลาถอยหลังค้าง   | ให้อัปเดตโค้ดในหน้าจอ `WaitlistScreen` เป็นเวอร์ชันล่าสุด (แก้ไขการแปลงรูปแบบเวลา ISO `+00:00` เรียบร้อยแล้ว)                                                     |
+| ระบบแจ้งเตือน Push Notification ไม่ทำงาน          | จำเป็นต้องรันผ่าน Dev Build ร่วมกับมีไฟล์ `google-services.json` และทดสอบบนเครื่องจริงเท่านั้น (Emulator ไม่รองรับ FCM Token)                                     |
+| ระบบ Faable แจ้งเตือนข้อผิดพลาด `paired builder`  | เกิดจากปัญหาทางเทคนิคของแพลตฟอร์ม → ให้กด Redeploy หากยังไม่หายให้ติดต่อทีม Support พร้อมแจ้ง Deployment ID                                                       |
+
+#### **ข้อควรทราบด้านความปลอดภัย**
+
+- รหัสผ่านทั้งหมดถูกจัดเก็บด้วยการเข้ารหัส bcrypt hash โดยไม่มีการเก็บรหัสผ่านจริง และส่งข้อมูลผ่านโปรโตคอล HTTPS ในระบบจริง
+- ระบบเข้าสู่ระบบมีการจำกัดจำนวนครั้งการใช้งาน (Rate Limit) ในหน่วยความจำของแต่ละ Instance (ข้อมูลการนับจะถูกล้างเมื่อรีสตาร์ทระบบ)
+- Endpoint สำหรับผู้ดูแลระบบมีการตรวจสอบสิทธิ์ Admin จากฐานข้อมูลก่อนอนุญาตให้ปรับเปลี่ยนค่าระบบเสมอ
+- การตั้งค่า CORS กำหนดให้เข้าถึงได้เฉพาะเครือข่าย Local/LAN เท่านั้น (แอปพลิเคชันแบบ Native App จะไม่ถูกจำกัดด้วยเงื่อนไข CORS)
+- ห้าม Commit ไฟล์ `backend/.env`, ไฟล์สำรองข้อมูลประเภท `*.csv` และ Token ส่วนตัวลงในระบบ Git โดยเด็ดขาด
+
+#### **โครงสร้างโปรเจกต์**
+
+```text
+├── App.js                  # ตัวจัดการเส้นทางด้วย State และโมดอลแจ้งเตือนหลัก
+├── api.js                  # กำหนดค่า BASE_URL, apiFetch และฟังก์ชัน API ทั้งหมด (Single Source of Truth)
+├── usePushNotifications.js # ระบบลงทะเบียนรับ Expo Push Token
+├── screens/                # หน้าจอการทำงานทั้ง 11 หน้า (Login, Menu, Manual, AI, Cart, Schedule, GroupSync ฯลฯ)
+├── components/shared.js    # คอมโพเนนต์เมนูหลัก (NavBar) และการ์ดแสดงผลส่วนกลาง
+├── backend/
+│   ├── main.py             # จุดศูนย์รวมระบบ FastAPI รวม 36 Endpoints และระบบตั้งเวลา Scheduler
+│   ├── database.py         # โครงสร้าง SQLAlchemy Models (ใช้วิธีอ่านค่าจาก Environment ไม่ Hardcode ข้อมูลสำคัญ)
+│   ├── requirements.txt
+│   └── supabase/migrations/# ไฟล์ Migration สำหรับสร้าง Schema v2 (0001) และข้อมูลตัวอย่าง (0002)
+├── scripts/                # สคริปต์สำหรับสั่งรัน Backend และระบบ Tunnel เบื้องหลัง (สำหรับระบบปฏิบัติการ Windows)
+├── faable.json + requirements.txt + runtime.txt  # ไฟล์ตั้งค่าสำหรับการ Deploy ขึ้นระบบ Faable
+└── assets/                 # ไฟล์โลโก้สถาบัน UPS (สำหรับใช้ในการจัดแสดงผลงาน)
+
+```
+
+---
+
+### **แบบที่ 2: ปรับให้กระชับ เป็นทางการ หรือมีความสร้างสรรค์มากขึ้น (Creative/Professional)**
+
+**UPS Regis — ระบบลงทะเบียนเรียนผ่านแอปพลิเคชันมือถือ**
+
+> **เอกสารประกอบผลงานทางวิชาการ (Demonstration Only)**
+> "UPS" เป็นสถาบันการศึกษาสมมติ จัดทำขึ้นเพื่อการสาธิตระบบเท่านั้น ไม่มีส่วนเกี่ยวข้องกับสถาบันการศึกษาใด และไม่ได้เปิดใช้งานในระบบลงทะเบียนจริง
+
+แอปพลิเคชันลงทะเบียนเรียนสำหรับนักศึกษา พัฒนาด้วย **React Native / Expo** มาพร้อมฟีเจอร์ครบวงจร อาทิ การค้นหารายวิชา, ระบบจัดตารางเรียนอัจฉริยะด้วย AI, ตะกร้าลงทะเบียน, การซิงค์ข้อมูลกลุ่มเพื่อน, ระบบคิวสำรอง (Waitlist) พร้อมแจ้งเตือนแบบเรียลไทม์ และแผงควบคุมสำหรับผู้ดูแลระบบ (Admin) เพื่อบริหารจัดการรอบลงทะเบียนและสถานะการปรับปรุงระบบ
+
+---
+
+#### **สารบัญ**
 
 ## สารบัญ
 
@@ -26,246 +308,274 @@
 - [หมายเหตุด้านความปลอดภัย](#หมายเหตุด้านความปลอดภัย)
 - [โครงสร้างโปรเจกต์](#โครงสร้างโปรเจกต์)
 
-## สถาปัตยกรรม
+---
+
+#### **สถาปัตยกรรมระบบ**
 
 ```text
-┌──────────────┐   HTTPS/JSON   ┌──────────────┐   SQL (pooler :6543)   ┌──────────────┐
+┌──────────────┐   HTTPS/JSON   ┌──────────────┐   SQL (Pooler :6543)   ┌──────────────┐
 │  Expo App    │ ────────────► │   FastAPI    │ ─────────────────────► │  Supabase    │
 │ (11 screens) │ ◄──────────── │  (main.py)   │                        │  Postgres    │
 └──────────────┘  BASE_URL     └──────────────┘                        └──────────────┘
-      │ push ลงทะเบียนผ่าน usePushNotifications → POST /students/{id}/push-token
-      │ แจ้งเตือนขาออกผ่าน Expo Push Service (exponent_server_sdk)
+      │ ลงทะเบียน Push Token ผ่าน usePushNotifications → POST /students/{id}/push-token
+      │ ส่งการแจ้งเตือนขาออกผ่าน Expo Push Service (exponent_server_sdk)
+
 ```
 
-- **Routing ฝั่งแอป:** state-based (`App.js` สลับ `view`) ไม่ใช้ React Navigation
-- **Navbar:** component กลาง `NavBar` ใน `components/shared.js` ใช้เหมือนกัน 9 จอ
-- **Backend:** process เดียว + APScheduler 2 jobs (หมดอายุสิทธิ์ waitlist / จัดสรรที่นั่ง ทุก 1 นาที)
+- **Frontend Navigation:** ใช้การสลับหน้าจอตามสเตต (`App.js` ควบคุม `view`) โดยไม่ผ่าน React Navigation
+- **Global Navigation Bar:** คอมโพเนนต์ `NavBar` ใน `components/shared.js` ถูกใช้งานร่วมกันใน 9 หน้าจอหลัก
+- **Backend Processing:** ประมวลผลแบบ Single Process ทำงานร่วมกับ **APScheduler** จำนวน 2 งาน (ยกเลิกสิทธิ์ Waitlist ที่หมดอายุ และจัดสรรที่นั่งว่าง ตรวจสอบทุก 1 นาที)
 
-## เทคโนโลยีที่ใช้
+---
 
-| ชั้น | เทคโนโลยี | เวอร์ชัน |
-|---|---|---|
-| Mobile | Expo SDK / React Native / React | ~54 / 0.81 / 19.1 |
-| ภาษาแอป | JavaScript (React) | — |
-| Backend | FastAPI / Uvicorn / SQLAlchemy / APScheduler | 0.135 / 0.42 / 2.0 / 3.11 |
-| Database | Supabase Postgres (pooler) | — |
-| Auth/Push | bcrypt hash / Expo Notifications | — |
-| Hosting ปัจจุบัน | Faable (HTTPS) | — |
-| Dev build | EAS development client | — |
+#### **เทคโนโลยีที่ใช้**
 
-## สิ่งที่ต้องมีก่อนเริ่ม
+| เลเยอร์              | เทคโนโลยี / ไลบรารี                          | เวอร์ชัน                  |
+| -------------------- | -------------------------------------------- | ------------------------- |
+| **Mobile App**       | Expo SDK / React Native / React              | ~54 / 0.81 / 19.1         |
+| **Language**         | JavaScript (React)                           | —                         |
+| **Backend Services** | FastAPI / Uvicorn / SQLAlchemy / APScheduler | 0.135 / 0.42 / 2.0 / 3.11 |
+| **Database**         | Supabase Postgres (ผ่าน Connection Pooler)   | —                         |
+| **Auth & Push**      | bcrypt hashing / Expo Notifications          | —                         |
+| **Hosting Service**  | Faable (HTTPS)                               | —                         |
+| **Dev Environment**  | EAS development client                       | —                         |
 
-- Node.js LTS + npm (`node --version`)
-- Python 3.11 (`python --version`)
-- บัญชี Supabase (1 project) และ connection string แบบ **pooler `:6543`**
-- แอป Expo Go (เทสทั่วไป) หรือ dev build APK (เทส push)
-- Windows PowerShell (สคริปต์ `scripts/*.ps1`)
+---
 
-## เริ่มต้นใช้งานด่วน
+#### **ข้อกำหนดก่อนการติดตั้ง**
+
+- **Node.js LTS + npm** (ตรวจสอบด้วย `node --version`)
+- **Python 3.11** (ตรวจสอบด้วย `python --version`)
+- **Supabase Project** พร้อมข้อความเชื่อมต่อ (Connection String) แบบ **Pooler พอร์ต `:6543**`
+- **Expo Go** (สำหรับการทดสอบทั่วไป) หรือ **Dev Build APK** (สำหรับการทดสอบ Push Notification)
+- **Windows PowerShell** (สำหรับรันสคริปต์ประเภท `scripts/*.ps1`)
+
+---
+
+#### **คู่มือการติดตั้งและใช้งาน**
+
+##### **การเริ่มต้นใช้งานด่วน**
 
 ```powershell
-# 1) Frontend
+# 1. ติดตั้งและเริ่มทำงาน Frontend
 npm install
-npx expo start            # สแกน QR ด้วย Expo Go / dev build
+npx expo start            # สแกน QR Code ด้วย Expo Go หรือ Dev Build
 
-# 2) Backend (อีก terminal, workdir backend\)
+# 2. ติดตั้งและเริ่มทำงาน Backend (เปิด Terminal ใหม่ ในโฟลเดอร์ backend\)
 pip install -r backend\requirements.txt
-copy backend\.env.example backend\.env   # แล้วใส่ DATABASE_URL จริง
+copy backend\.env.example backend\.env   # คัดลอกและระบุค่า DATABASE_URL
 cd backend
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
 ```
 
-เปิด `http://localhost:8000/admin/config` ต้องได้ `{"registration_open":true}`
+ตรวจสอบการทำงานโดยเปิด `http://localhost:8000/admin/config` ระบบต้องแสดงผล `{"registration_open":true}`
 
-> มือถือจริงต้องอยู่ใน Wi-Fi เดียวกันและ `api.js` ชี้ `BASE_URL` ไป IP/URL ที่มือถือเข้าถึงได้
-> (ห้ามใช้ `localhost` บนมือถือ)
+> **ข้อควรระวัง:** การทดสอบผ่านอุปกรณ์จริง ต้องเชื่อมต่อ Wi-Fi เดียวกับเซิร์ฟเวอร์ และตั้งค่า `BASE_URL` ใน `api.js` เป็น IP หรือ URL ที่อุปกรณ์เข้าถึงได้ (ห้ามกำหนดเป็น `localhost`)
 
-## ตั้งค่า Backend
+##### **การตั้งค่า Backend**
 
 ```powershell
 cd backend
-python -m venv .venv; .\.venv\Scripts\Activate.ps1   # แนะนำ
+python -m venv .venv; .\.venv\Scripts\Activate.ps1   # สื่อสารผ่าน Virtual Environment
 pip install -r requirements.txt
+
 ```
 
-สร้าง `backend/.env` (ไฟล์นี้ถูก gitignore ห้าม commit):
+สร้างไฟล์ `backend/.env` (ไฟล์นี้ถูกยกเว้นการส่งขึ้น Git):
 
 ```env
 DATABASE_URL=postgresql://postgres.<REF>:<PASSWORD>@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres
+
 ```
 
-ข้อบังคับของ connection string:
+**เงื่อนไขสำคัญของ Connection String:**
 
-- ใช้ **pooler `:6543`** เท่านั้น ห้ามใช้ direct `db.xxx:5432` (IPv6-only ต่อไม่ติด)
-- user ต้องมี `.REF` ต่อท้าย (`postgres.<REF>`) สำหรับ pooler
-- แก้ `.env` แล้วต้อง **รีสตาร์ท uvicorn** (reloader ไม่ตามไฟล์ `.env`)
+- กำหนดใช้ **Pooler พอร์ต `:6543**`เท่านั้น (ห้ามใช้ Direct Connection พอร์ต`:5432` เนื่องจากรองรับเฉพาะ IPv6)
+- ต้องระบุ `.<REF>` ต่อท้าย Username เพื่อการใช้งานผ่าน Pooler
+- เมื่อแก้ไขไฟล์ `.env` จำเป็นต้อง **รีสตาร์ท Uvicorn** ทุกครั้ง
 
-## ตั้งค่าฐานข้อมูล
+##### **การตั้งค่าฐานข้อมูล**
 
-รันใน Supabase Dashboard → SQL Editor ตามลำดับ (project ใหม่ที่ว่าง):
+ดำเนินการรันคำสั่งบน Supabase Dashboard → SQL Editor ตามลำดับ:
 
-1. `backend/supabase/migrations/0001_schema_v2.sql` — สร้าง 14 ตาราง + type + index + config เริ่มต้น
-2. `backend/supabase/migrations/0002_seed_demo.sql` — ข้อมูล demo (รันซ้ำได้)
+1. `backend/supabase/migrations/0001_schema_v2.sql` — สร้าง 14 ตารางหลัก, ประเภทข้อมูล, ดรรชนี และการตั้งค่าเริ่มต้น
+2. `backend/supabase/migrations/0002_seed_demo.sql` — นำเข้าข้อมูลตัวอย่างสำหรับทดสอบ
 
-ตรวจหลังรัน:
+**การตรวจสอบความถูกต้อง:**
 
 ```sql
-SELECT count(*) FROM student;        -- 10
-SELECT count(*) FROM course;         -- 12
-SELECT count(*) FROM class_section;  -- 22
+SELECT count(*) FROM student;        -- จำนวนต้องเท่ากับ 10
+SELECT count(*) FROM course;         -- จำนวนต้องเท่ากับ 12
+SELECT count(*) FROM class_section;  -- จำนวนต้องเท่ากับ 22
 SELECT * FROM system_config;         -- registration_open=true, maintenance_mode=false
+
 ```
 
-รายละเอียดคอลัมน์สำคัญ:
+**โครงสร้างข้อมูลสำคัญ:**
 
-- `student.password_hash` — bcrypt (`$2a$`/`$2b$`) ไม่เก็บรหัสจริง
-- `course.credits` — SMALLINT
-- `class_section.section_type` (`T`/`L`) — คอลัมน์จริง (คอลัมน์ `room` ยังมี `(ท)/(ป)` ไว้เพื่อ compat)
-- `enrollment` มี UNIQUE `(student_id, course_id, section_type)` กันลงซ้ำระดับ DB
-- สูตรคงยอดที่นั่ง: `enrolled_seats = จำนวน enrollment + hold ที่ ALLOCATED`
+- `student.password_hash` — จัดเก็บด้วยรหัส bcrypt (`$2a$`/`$2b$`)
+- `course.credits` — กำหนดเป็น SMALLINT
+- `class_section.section_type` (`T` = ทฤษฎี, `L` = ปฏิบัติ) — แยกคอลัมน์ชัดเจน
+- `enrollment` — ตั้งค่า UNIQUE `(student_id, course_id, section_type)` ป้องกันการลงทะเบียนซ้ำซ้อน
+- **การคำนวณที่นั่ง:** `enrolled_seats = ยอดลงทะเบียนสำเร็จ + จำนวนสิทธิ์สำรองชั่วคราว (ALLOCATED)`
 
-## ตั้งค่า Frontend
+##### **การตั้งค่า Frontend**
 
 ```powershell
 npm install
+
 ```
 
-แก้ `api.js` บรรทัด `BASE_URL` ให้ตรง backend ที่จะใช้ (มีที่เดียว `usePushNotifications` ดึงจากที่นี่):
+ระบุค่า `BASE_URL` ในไฟล์ `api.js` ให้สอดคล้องกับสภาพแวดล้อมการทำงาน:
 
-| สถานการณ์ | ค่า |
-|---|---|
-| Backend production (Faable) | `https://ups-regis-k49tx.faable.link` |
-| Backend บนคอม + เทสผ่าน Expo Go/มือถือ | `http://<IP-คอม>:8000` |
-| Expo web บนคอม | `http://localhost:8000` |
+| สภาพแวดล้อม                    | การตั้งค่า `BASE_URL`                                                        |
+| ------------------------------ | ---------------------------------------------------------------------------- |
+| Production (Faable)            | `[https://ups-regis-k49tx.faable.link](https://ups-regis-k49tx.faable.link)` |
+| Local Server (ทดสอบผ่านมือถือ) | `http://<IP-คอมพิวเตอร์>:8000`                                               |
+| Local Server (ทดสอบผ่าน Web)   | `http://localhost:8000`                                                      |
 
-รัน:
+**การรันแอปพลิเคชัน:**
 
 ```powershell
-npx expo start                 # Expo Go (push ใช้ไม่ได้บน SDK 53+)
-npx expo start --dev-client    # dev build (push ใช้ได้)
+npx expo start                 # สำหรับ Expo Go (ไม่รองรับ Push ใน SDK 53+)
+npx expo start --dev-client    # สำหรับ Dev Build (รองรับ Push Notification)
+
 ```
 
-Build dev client Android:
+**การสร้าง Dev Build (Android):**
 
 ```powershell
 eas build --profile development --platform android
+
 ```
 
-> Push notification ต้องมี `google-services.json` (Firebase, package `com.chatpeth.RegistrationApp`)
-> วางที่ root แล้ว build ใหม่ — ไม่มีไฟล์นี้จะขอ token ไม่ได้ทุกเครื่อง
+> **คำแนะนำ:** การใช้งาน Push Notification ต้องวางไฟล์ `google-services.json` (Package Name: `com.chatpeth.RegistrationApp`) ไว้ที่ตำแหน่ง Root ก่อนสั่ง Build
 
-## ตัวแปรแวดล้อมและ Secrets
+##### **การจัดการตัวแปรแวดล้อม (Environment Variables)**
 
-| ที่อยู่ | ชื่อ | ใช้ทำอะไร |
-|---|---|---|
-| `backend/.env` (local, ห้าม commit) | `DATABASE_URL` | backend ต่อ Postgres |
-| Faable/Replit Secrets | `DATABASE_URL` (หรือ `APP_DATABASE_URL` บน Replit) | backend บน host |
-| `api.js` | `BASE_URL` | แอปชี้ backend |
-| Supabase | DB password | เปลี่ยนที่ Project Settings → Database |
+| รายการ          | ชื่อตัวแปร                          | รายละเอียด                                      |
+| --------------- | ----------------------------------- | ----------------------------------------------- |
+| `backend/.env`  | `DATABASE_URL`                      | สายอักขระเชื่อมต่อ Postgres สำหรับ Local        |
+| Hosting Secrets | `DATABASE_URL` / `APP_DATABASE_URL` | สายอักขระเชื่อมต่อ Postgres บนเซิร์ฟเวอร์       |
+| `api.js`        | `BASE_URL`                          | URL สำหรับการเรียกใช้ API จากฝั่ง Frontend      |
+| Supabase        | DB Password                         | รหัสผ่านฐานข้อมูล (จัดการผ่าน Project Settings) |
 
-## วิธีใช้งานตามบทบาท
+---
 
-**นักศึกษา** (`MENU` → 4 แท็บหลัก: หน้าแรก / รายวิชา / ตะกร้า / ตารางเรียน)
+#### **การใช้งานตามบทบาทผู้ใช้**
 
-1. Login ด้วยรหัสนักศึกษา + รหัสผ่าน
-2. `รายวิชา` — ค้นหา/เลือก section เอง หรือใช้ AI จัดแผนไม่ชน (สูงสุด 10 วิชา/10 แผน)
-3. `ลงทะเบียนยกภาค` — batch เพิ่มวิชาบังคับ (ข้ามวิชาที่มีแล้ว เลือกกลุ่มที่ว่าง)
-4. `ตะกร้า` — ตรวจชนเวลา → ยืนยัน (วิชาเต็มไม่เททั้งตะกร้า ระบบลงวิชาที่ได้และค้างวิชาที่เต็มไว้พร้อมเหตุผล)
-5. `เพื่อนช่วยลง` — สร้าง/เข้ากลุ่ม (สูงสุด 5 คน) หัวหน้า sync ตะกร้าและกดลงทะเบียนให้ทั้งกลุ่ม
-6. `Waitlist` — เข้าคิววิชาที่เต็ม ได้สิทธิ์แล้วต้องยืนยันใน **30 นาที** (เกินเวลาสิทธิ์หลุด)
-7. `Profile` — ดูเกรด/CGPA, เปลี่ยนรหัสผ่าน, ออกจากระบบ
+**ส่วนนักศึกษา** (เข้าถึงผ่านเมนูหลัก 4 ส่วน: หน้าแรก / รายวิชา / ตะกร้า / ตารางเรียน)
 
-**แอดมิน** (`ADMIN_HOME` หลัง login ด้วยรหัส admin)
+1. เข้าสู่ระบบด้วยรหัสนักศึกษาและรหัสผ่าน
+2. **ระบบเลือกวิชา:** เลือกกลุ่มเรียนด้วยตนเอง หรือใช้ระบบ AI ช่วยวางแผนตารางเรียนที่ไม่ซ้อนทับกัน (จัดชุดวิชาได้สูงสุด 10 วิชา/10 รูปแบบ)
+3. **ระบบลงทะเบียนยกภาค:** เพิ่มวิชาบังคับแบบกลุ่มอัตโนมัติ โดยระบบจะคัดเลือกเฉพาะกลุ่มเรียนที่ยังมีที่นั่งว่าง
+4. **การยืนยันการลงทะเบียน:** ระบบตรวจสอบการชนของเวลา หากมีบางวิชาเต็ม ระบบจะลงทะเบียนวิชาที่ว่างให้สำเร็จ และคงวิชาที่เต็มไว้ในตะกร้าพร้อมแสดงเหตุผล
+5. **ระบบกลุ่มเรียน (Friend Sync):** รองรับกลุ่มละไม่เกิน 5 คน โดยหัวหน้ากลุ่มสามารถซิงค์ตะกร้าและดำเนินการลงทะเบียนแทนสมาชิกในกลุ่มได้
+6. **ระบบคิวสำรอง (Waitlist):** เมื่อได้รับสิทธิ์ลงทะเบียนในวิชาที่เต็ม ต้องทำการยืนยันสิทธิ์ภายใน **30 นาที**
+7. **ส่วนตัวบุคคล (Profile):** ตรวจสอบเกรดเฉลี่ย (CGPA), เปลี่ยนรหัสผ่าน และออกจากระบบ
 
-- เปิด/ปิดรอบลงทะเบียน, เปิด/ปิด maintenance mode (ตอนปิด ทุก endpoint เขียนตอบ 403 เหลือแต่อ่าน)
-- ค้นหานักศึกษา (สูงสุด 20 รายการ) ดูตารางเรียน/คิว/เกรด
-- ซ่อมตัวนับที่นั่งราย section (`POST /admin/recount-seats`)
+**ส่วนผู้ดูแลระบบ (Admin)** (เข้าใช้งานผ่านสิทธิ์ Admin)
 
-## API โดยย่อ
+- ควบคุมการเปิด-ปิดระบบลงทะเบียน และการเปิดโหมดปรับปรุงระบบ (Maintenance Mode)
+- ตรวจสอบข้อมูลนักศึกษา (ค้นหาได้สูงสุด 20 รายการ) ทั้งตารางเรียน, สถานะคิว และผลการเรียน
+- คำนวณและปรับปรุงยอดสรุปที่นั่งของแต่ละกลุ่มเรียน (`POST /admin/recount-seats`)
 
-Base: `https://ups-regis-k49tx.faable.link` (หรือ `http://<host>:8000` ตอน dev)
+---
 
-| กลุ่ม | Endpoints |
-|---|---|
-| Auth | `POST /login` (เช็ค bcrypt + rate limit ผิด 5 ครั้ง/15 นาที → 429) |
-| Courses | `GET /courses/available/{id}`, `/courses/suggested/{id}`, `/sections/{code}`, `/courses/{id}/sections`, `/z-options/{id}/{z}` |
-| AI | `POST /ai-suggest` |
-| Cart | `POST /cart/add`, `GET /cart/{id}`, `POST /cart/batch_add_with_check`, `POST /cart/remove`, `POST /cart/confirm/{id}` (partial: `success/partial/failed`) |
-| Group | `POST /group/create|join|ready|sync|approve|register-all|mark-seen-registered`, `DELETE /group/leave|delete`, `GET /group/my/{id}` |
-| Enroll | `GET /enroll/my/{id}`, `POST /enrollment/withdraw` |
-| Waitlist | `POST /waitlist/join|confirm|cancel`, `GET /waitlist/status/{id}` |
-| Student | `POST /students/{id}/push-token`, `POST /students/{id}/change-password` |
-| Admin | `GET /admin/config|maintenance-status|students/search`, `POST /admin/toggle-registration|toggle-maintenance|recount-seats` |
+#### **ภาพรวม API (API Overview)**
 
-Interactive docs (ตอนรัน local): `http://localhost:8000/docs`
+**Base URL:** `[https://ups-regis-k49tx.faable.link](https://ups-regis-k49tx.faable.link)` (หรือ `http://<host>:8000` สำหรับการพัฒนา)
 
-## บัญชีทดสอบ
+| หมวดหมู่           | รายการ Endpoints                                                                                                              |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| **Authentication** | `POST /login` (จำกัดการลองผิดเกิน 5 ครั้ง/15 นาที)                                                                            |
+| **Courses**        | `GET /courses/available/{id}`, `/courses/suggested/{id}`, `/sections/{code}`, `/courses/{id}/sections`, `/z-options/{id}/{z}` |
+| **AI Planner**     | `POST /ai-suggest`                                                                                                            |
+| **Cart System**    | `POST /cart/add`, `GET /cart/{id}`, `POST /cart/batch_add_with_check`, `POST /cart/remove`, `POST /cart/confirm/{id}`         |
+| **Group Sync**     | `POST /group/create                                                                                                           |
+| **Enrollment**     | `GET /enroll/my/{id}`, `POST /enrollment/withdraw`                                                                            |
+| **Waitlist**       | `POST /waitlist/join                                                                                                          |
+| **Student Info**   | `POST /students/{id}/push-token`, `POST /students/{id}/change-password`                                                       |
+| **Administration** | `GET /admin/config                                                                                                            |
 
-รหัสผ่านเริ่มต้นทุกบัญชี: `123456` (ควรเปลี่ยนหลัง login ครั้งแรกผ่านหน้า Profile)
+_สามารถเข้าชม Swagger API Interactive Documentation ได้ที่ `http://localhost:8000/docs` ขณะเปิดใช้งาน Local Server_
 
-| รหัส | บทบาท | หมายเหตุ |
-|---|---|---|
-| `68100001`–`68100004` | นศ. CPE ปี 1 | ใช้งานทั่วไป |
-| `68100101` | นศ. ICT ปี 1 | — |
-| `67100001` | นศ. CPE ปี 2 | มีเกรดตัวอย่าง |
-| `66100001` | นศ. CPE ปี 3 | — |
-| `68300001` / `67300001` | นศ. LSM ปี 1/2 | — |
-| `ADM001` | แอดมิน | จอ admin |
-| GEN101 กลุ่ม 2 | — | เต็ม 60/60 ไว้ทดสอบ waitlist |
+---
 
-## สคริปต์ช่วยงาน
+#### **ข้อมูลบัญชีสำหรับทดสอบ**
 
-`scripts/*.ps1` (คลิกขวา → Run with PowerShell):
+> **รหัสผ่านเริ่มต้นสำหรับทุกบัญชี:** `123456` (แนะนำให้เปลี่ยนรหัสผ่านหลังการเข้าสู่ระบบครั้งแรก)
 
-- `start-all.ps1` — รัน backend + tunnel เบื้องหลัง + sync `BASE_URL` อัตโนมัติ
-- `sync-baseurl.ps1` — อ่าน URL tunnel ล่าสุดมาใส่ `api.js`
-- `stop-all.ps1` — หยุดทั้งหมด
-- `common.ps1` — ค่ารวม (ไม่ต้องรันตรง)
+| รหัสผู้ใช้              | บทบาท                        | หมายเหตุ                                                 |
+| ----------------------- | ---------------------------- | -------------------------------------------------------- |
+| `68100001` – `68100004` | นักศึกษา CPE ชั้นปีที่ 1     | บัญชีทดสอบทั่วไป                                         |
+| `68100101`              | นักศึกษา ICT ชั้นปีที่ 1     | บัญชีทดสอบทั่วไป                                         |
+| `67100001`              | นักศึกษา CPE ชั้นปีที่ 2     | มีข้อมูลประวัติการเรียนตัวอย่าง                          |
+| `66100001`              | นักศึกษา CPE ชั้นปีที่ 3     | บัญชีทดสอบทั่วไป                                         |
+| `68300001` / `67300001` | นักศึกษา LSM ชั้นปีที่ 1 / 2 | บัญชีทดสอบทั่วไป                                         |
+| `ADM001`                | ผู้ดูแลระบบ (Admin)          | สิทธิ์เข้าถึงแผงควบคุมระบบ                               |
+| `GEN101` (Section 2)    | รายวิชาทดสอบ                 | ตั้งค่าจำนวนผู้เรียนเต็ม (60/60) เพื่อทดสอบระบบ Waitlist |
 
-สำรอง DB เก่า: `python backend/backup_old_db.py` (ต้องตั้ง `OLD_DATABASE_URL` ก่อน ผลลัพธ์อยู่ `backend/supabase/backup/` ซึ่งถูก gitignore)
+---
 
-## การ Deploy ขึ้น Production
+#### **สคริปต์ช่วยการทำงาน**
 
-- **Backend ปัจจุบัน:** Faable (free) — push `main` แล้ว deploy อัตโนมัติ ตั้ง secret `DATABASE_URL` ใน dashboard
-- **ทางเลือกที่เคยลอง:** Render (ต้องยืนยันบัตร), Hugging Face Spaces (ต้อง PRO สำหรับ Docker), Koyeb (ปิดรับใหม่), Cloudflare Tunnel (ชั่วคราว ต้องเปิดคอม)
-- **Replit fallback:** มี `.replit` แล้ว ใช้ secret ชื่อ `APP_DATABASE_URL` (ชื่อ `DATABASE_URL` ถูกระบบจอง)
+สคริปต์อำนวยความสะดวกในโฟลเดอร์ `scripts/*.ps1` (สั่งงานผ่าน PowerShell):
 
-## แก้ปัญหาเบื้องต้น
+- `start-all.ps1` — เริ่มการทำงานของ Backend, เปิดใช้ Tunnel และซิงค์ `BASE_URL` โดยอัตโนมัติ
+- `sync-baseurl.ps1` — ดึงค่า Tunnel URL ล่าสุดเพื่ออัปเดตลงใน `api.js`
+- `stop-all.ps1` — ยุติการทำงานของกระบวนการทั้งหมด
+- `common.ps1` — รวบรวมค่าตัวแปรส่วนกลาง
 
-| อาการ | สาเหตุ/ทางแก้ |
-|---|---|
-| `password authentication failed` | รหัสใน `.env`/secret ผิด → reset ใน Supabase แล้วแก้ทั้ง 2 ที่ + รีสตาร์ท backend |
-| `could not translate host name db.xxx` | ใช้ direct `:5432` → เปลี่ยนเป็น pooler `:6543` |
-| แก้ `.env` แล้วไม่หาย | reloader ไม่ตาม `.env` → Ctrl+C แล้วรันใหม่ |
-| มือถือต่อ backend ไม่ติด | ใช้ LAN IP ไม่ใช่ `localhost` + รัน uvicorn ด้วย `--host 0.0.0.0` + Wi-Fi เดียวกัน |
-| Alert โชว์ HTML | backend ล่ม/suspend → `api.js` ดักไว้แล้ว จะบอกให้ตรวจ backend แทน |
-| Login 429 | ผิดเกิน 5 ครั้งใน 15 นาที → รอ หรือรีสตาร์ท backend (ล้างตัวนับ memory) |
-| `Invalid Date` / นับถอยหลังค้าง | อัปเดตโค้ด WaitlistScreen ล่าสุด (แก้ parse ISO `+00:00` แล้ว) |
-| Push ไม่เข้า | ต้อง dev build + `google-services.json` + เครื่องจริง (emulator ไม่มี FCM token) |
-| Faable build `paired builder` | ปัญหาฝั่ง platform → Redeploy, ไม่หายทัก support พร้อม deployment id |
+สคริปต์สำรองข้อมูล: `python backend/backup_old_db.py` (ต้องกำหนดค่า `OLD_DATABASE_URL` ข้อมูลจะถูกจัดเก็บที่ `backend/supabase/backup/`)
 
-## หมายเหตุด้านความปลอดภัย
+---
 
-- รหัสผ่านเก็บแบบ bcrypt hash ไม่เก็บตัวจริง ส่งผ่าน HTTPS ใน production
-- Login มี rate limit (in-memory ต่อ instance — รีสตาร์ทแล้วหาย)
-- Admin endpoints ตรวจว่าเป็น admin ใน DB ก่อน toggle
-- CORS จำกัดเฉพาะ local/LAN (native app ไม่โดน CORS อยู่แล้ว)
-- ห้าม commit `backend/.env`, ไฟล์ `*.csv` backup, token ส่วนตัว
+#### **การปรับใช้บนเซิร์ฟเวอร์จริง (Production Deployment)**
 
-## โครงสร้างโปรเจกต์
+- **Backend Service:** ดำเนินการผ่าน **Faable** โดยระบบจะทำการ Build และ Deploy อัตโนมัติเมื่อมีการ Push ไปยังสาขา `main` (ต้องกำหนดค่า `DATABASE_URL` ใน Environment Variables)
+- **ทางเลือกอื่นที่รองรับ:** Replit (ผ่านการตั้งค่าไฟล์ `.replit` โดยกำหนดชื่อ Secret เป็น `APP_DATABASE_URL`)
+
+---
+
+#### **การแก้ไขปัญหาที่พบบ่อย (Troubleshooting)**
+
+- **`password authentication failed`:** ตรวจสอบและแก้ไขรหัสผ่านในไฟล์ `.env` หรือ Secrets บนเซิร์ฟเวอร์ให้ถูกต้อง แล้วทำการรีสตาร์ท Backend
+- **`could not translate host name db.xxx`:** เปลี่ยนการเชื่อมต่อจาก Direct Connection (`:5432`) มาใช้ Connection Pooler (`:6543`)
+- **แก้ไข `.env` แล้วระบบไม่อัปเดต:** สั่งยุติการทำงานของ Uvicorn (`Ctrl+C`) แล้วเปิดใหม่อีกครั้ง
+- **อุปกรณ์เคลื่อนที่ ไม่สามารถเชื่อมต่อ Backend ได้:** ตรวจสอบว่าใช้อินเทอร์เน็ตวงเดียวกัน, กำหนด IP ให้ถูกต้อง และเปิดใช้งาน Uvicorn ด้วยคำสั่ง `--host 0.0.0.0`
+- **การแจ้งเตือนแสดงผลเป็น HTML:** ตรวจสอบสถานะการทำงานของเซิร์ฟเวอร์ Backend
+- **การเข้าสู่ระบบขึ้นข้อความ 429:** มีการเข้าสู่ระบบผิดพลาดเกินจำนวนที่กำหนด ให้รอ 15 นาที หรือรีสตาร์ท Backend เพื่อล้างค่า
+- **Push Notification ไม่ทำงาน:** ต้องทดสอบผ่านอุปกรณ์จริงที่รันด้วย Dev Build และติดตั้งไฟล์ `google-services.json` เรียบร้อยแล้ว
+
+---
+
+#### **มาตรฐานความปลอดภัย**
+
+- เข้ารหัสรหัสผ่านด้วยอัลกอริทึม **bcrypt** และสื่อสารผ่านโปรโตคอล **HTTPS**
+- มีระบบ **Rate Limiting** ป้องกันการสุ่มรหัสผ่าน (Brute-force Protection)
+- กำหนดสิทธิ์การเข้าถึง API สำหรับผู้ดูแลระบบ โดยตรวจสอบสถานะจากฐานข้อมูลทุกครั้ง
+- จำกัดขอบเขตการเข้าถึง (CORS Policy) ให้รองรับเฉพาะโดเมนและเครือข่ายที่กำหนด
+- ยกเว้นการ Commit ข้อมูลความลับ เช่น ไฟล์ `.env`, ไฟล์สำรองข้อมูล และ Access Token เข้าสู่ระบบควบคุมเวอร์ชัน (Git)
+
+---
+
+#### **โครงสร้างโปรเจกต์**
 
 ```text
-├── App.js                  # state router + global alert modal
-├── api.js                  # BASE_URL + apiFetch + API functions (single source)
-├── usePushNotifications.js # ลงทะเบียน Expo push token
-├── screens/                # 11 จอ (Login/Menu/Manual/AI/Cart/Schedule/GroupSync/...)
-├── components/shared.js    # NavBar กลาง + header/card ร่วม
+├── App.js                  # State Router หลัก และระบบการแสดงผล Alert Modal
+├── api.js                  # จุดจัดการการเชื่อมต่อ API ส่วนกลาง (Single Source of Truth)
+├── usePushNotifications.js # ฟังก์ชันจัดการ Push Token ของ Expo
+├── screens/                # ส่วนแสดงผลหน้าจอทั้งหมด 11 หน้า
+├── components/shared.js    # คอมโพเนนต์ส่วนกลาง (NavBar, Header, Card)
 ├── backend/
-│   ├── main.py             # FastAPI 36 endpoints + scheduler
-│   ├── database.py         # SQLAlchemy models (อ่าน env, ไม่ hardcode secret)
+│   ├── main.py             # แอปพลิเคชัน FastAPI (36 Endpoints) และบริการตั้งเวลา (Scheduler)
+│   ├── database.py         # โครงสร้างฐานข้อมูล (SQLAlchemy Models)
 │   ├── requirements.txt
-│   └── supabase/migrations/# 0001 schema v2 + 0002 seed demo
-├── scripts/                # สคริปต์รัน backend/tunnel เบื้องหลัง (Windows)
-├── faable.json + requirements.txt + runtime.txt  # config deploy Faable
-└── assets/                 # โลโก้ UPS (demo)
+│   └── supabase/migrations/# สคริปต์สำหรับการจัดการ Schema และข้อมูลตัวอย่าง
+├── scripts/                # สคริปต์ระบบสำหรับการทำงานบน Windows
+├── faable.json             # ไฟล์การตั้งค่าสำหรับการ Deploy บน Faable
+└── assets/                 # ทรัพยากรไฟล์ภาพและสื่อของโปรเจกต์
+
 ```
